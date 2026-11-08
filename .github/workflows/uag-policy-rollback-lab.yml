@@ -42,7 +42,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install Wrangler in disposable runner only
-        run: npm install --no-save --ignore-scripts wrangler@4.119.0
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
       - name: Apply schema with actual local Cloudflare D1 engine
         run: npx wrangler d1 execute DB --local --config cloud_host/wrangler.lab.toml --file cloud_host/schema.sql --yes
       - name: Verify actual local D1 policy revision table
@@ -58,6 +58,7 @@ jobs:
           ready=0
           for n in $(seq 1 35); do
             if curl --max-time 2 -fsS http://127.0.0.1:8787/health -o /tmp/uag-health.json; then ready=1; break; fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then cat /tmp/uag-local-workerd.log; exit 1; fi
             sleep 1
           done
           if [ "$ready" -ne 1 ]; then cat /tmp/uag-local-workerd.log; exit 1; fi
