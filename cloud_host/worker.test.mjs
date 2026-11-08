@@ -9,7 +9,7 @@ const TOKEN = "dummy-submit-token-for-public-tests-only-00000001";
 const DEVICE = "dummy-device-token-for-public-tests-only-0000001";
 
 class MockD1 {
-  constructor() { this.jobs = new Map(); this.policyState = null; }
+  constructor() { this.jobs = new Map(); this.policyState = null; this.policyRevisionWrites=0; }
   prepare(sql) {
     const db=this;
     return { bind(...args) { return {
@@ -50,10 +50,15 @@ class MockD1 {
         if (sql.startsWith("INSERT INTO owner_policy_state")) {
           const [revision,digest]=args;
           const previous=db.policyState;
-          if (previous && (revision<previous.revision ||
-              (revision===previous.revision && digest!==previous.digest))) return null;
-          if (!previous || revision>previous.revision) db.policyState={revision,digest};
+          if (previous && revision<=previous.revision) return null;
+          db.policyState={revision,digest};
+          db.policyRevisionWrites++;
           return {highest_revision:revision};
+        }
+        if (sql.startsWith("SELECT highest_revision FROM owner_policy_state")) {
+          return (db.policyState?.revision===args[0] &&
+            db.policyState?.digest===args[1])?
+            {highest_revision:args[0]}:null;
         }
         if (sql.startsWith("UPDATE jobs SET state='leased'")) {
           const [lease,device,revision,digest] = args;
@@ -330,4 +335,19 @@ test("claim refuses an owner policy revision race without leasing job",async()=>
   assert.equal(response.status,409);
   assert.equal((await response.json()).error,"policy_changed_during_claim");
   assert.equal(env.DB.jobs.get("race_claim_1").state,"queued");
+});
+test("unchanged signed grants avoid repeated D1 row writes",async()=>{
+  const env=await policyEnv();
+  assert.equal(env.DB.policyRevisionWrites,0);
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("reads_001"),TOKEN),env)).status,202);
+  assert.equal(env.DB.policyRevisionWrites,1);
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("reads_002"),TOKEN),env)).status,202);
+  assert.equal(env.DB.policyRevisionWrites,1);
+  assert.equal((await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env)).status,200);
+  assert.equal(env.DB.policyRevisionWrites,1);
+  await signRotatedPolicy(env,2,false);
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("reads_003"),TOKEN),env)).status,403);
+  assert.equal(env.DB.policyRevisionWrites,2);
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("reads_004"),TOKEN),env)).status,403);
+  assert.equal(env.DB.policyRevisionWrites,2);
 });
