@@ -67,3 +67,5 @@ jobs:
           test "$code" = 503
           grep -q '"owner_activation_not_configured"' /tmp/uag-denied.json
           echo 'OFFLINE_WORKER_DENY_BY_DEFAULT_OK'
+      - name: Real local workerd signed grants, revocation and rollback
+        run: node cloud_host/test_workerd_integration.mjs
