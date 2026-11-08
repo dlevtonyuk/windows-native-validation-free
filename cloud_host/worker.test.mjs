@@ -34,6 +34,19 @@ class MockD1 {
         return {success:true};
       },
       async first() {
+        if (sql.startsWith("INSERT INTO jobs")) {
+          const [id,cap,op,device,payload,created,revision,digest]=args;
+          if (db.policyState?.revision!==revision||db.policyState?.digest!==digest)
+            return null;
+          if (db.jobs.has(id)) throw Error("duplicate");
+          db.jobs.set(id,{job_id:id,capability:cap,operation:op,device,
+            payload_json:payload,created_at:created,state:"queued"});
+          return {job_id:id};
+        }
+        if (sql.startsWith("SELECT 1 AS matched FROM owner_policy_state")) {
+          return (db.policyState?.revision===args[0] &&
+            db.policyState?.digest===args[1])?{matched:1}:null;
+        }
         if (sql.startsWith("INSERT INTO owner_policy_state")) {
           const [revision,digest]=args;
           const previous=db.policyState;
@@ -43,7 +56,9 @@ class MockD1 {
           return {highest_revision:revision};
         }
         if (sql.startsWith("UPDATE jobs SET state='leased'")) {
-          const [lease,device] = args;
+          const [lease,device,revision,digest] = args;
+          if (db.policyState?.revision!==revision||db.policyState?.digest!==digest)
+            return null;
           const row=[...db.jobs.values()].filter(j=>j.state==="queued"&&j.device===device)
             .sort((a,b)=>a.created_at-b.created_at)[0];
           if (!row) return null;
@@ -274,4 +289,45 @@ test("completion policy revision race is denied atomically",async()=>{
   const reply=await gateway.fetch(req("/v1/device/complete","POST",done,DEVICE,"office_pc"),env);
   assert.equal(reply.status,409);
   assert.equal(env.DB.jobs.get("leased_r03").state,"leased");
+});
+
+test("submission refuses an owner policy revision race",async()=>{
+  const env=await policyEnv();
+  const prepare=env.DB.prepare.bind(env.DB);
+  env.DB.prepare=sql=>{
+    const result=prepare(sql);
+    if (!sql.startsWith("INSERT INTO jobs")) return result;
+    return {bind(...args){
+      const statement=result.bind(...args);
+      return {async first(){
+        env.DB.policyState.revision+=1; // revoke concurrently before atomic insert
+        return statement.first();
+      }};
+    }};
+  };
+  const r=await gateway.fetch(req("/v1/jobs","POST",job("race_post_1"),TOKEN),env);
+  assert.equal(r.status,409);
+  assert.equal((await r.json()).error,"policy_changed_during_submission");
+  assert.equal(env.DB.jobs.has("race_post_1"),false);
+});
+test("claim refuses an owner policy revision race without leasing job",async()=>{
+  const env=await policyEnv();
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("race_claim_1"),TOKEN),env)).status,202);
+  const prepare=env.DB.prepare.bind(env.DB);
+  env.DB.prepare=sql=>{
+    const result=prepare(sql);
+    if (!sql.startsWith("UPDATE jobs SET state='leased'")) return result;
+    return {bind(...args){
+      const statement=result.bind(...args);
+      return {async first(){
+        env.DB.policyState.revision+=1;
+        return statement.first();
+      }};
+    }};
+  };
+  const response=await gateway.fetch(req("/v1/device/claim?device=office_pc",
+    "GET",null,DEVICE),env);
+  assert.equal(response.status,409);
+  assert.equal((await response.json()).error,"policy_changed_during_claim");
+  assert.equal(env.DB.jobs.get("race_claim_1").state,"queued");
 });
