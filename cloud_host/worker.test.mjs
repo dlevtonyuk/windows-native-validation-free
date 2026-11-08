@@ -50,10 +50,26 @@ class MockD1 {
           row.state="leased";row.lease_until=lease;
           return {...row};
         }
-        if (sql.startsWith("UPDATE jobs SET state=?")) {
-          const [status,result,id,device,now]=args;
+        if (sql.startsWith("SELECT capability,operation,device FROM jobs")) {
+          const [id,device,now]=args;
           const row=db.jobs.get(id);
-          if (!row||row.device!==device||row.state!=="leased"||row.lease_until<=now)
+          return (row&&row.device===device&&row.state==="leased"&&
+            row.lease_until>now)?{capability:row.capability,operation:row.operation,
+              device:row.device}:null;
+        }
+        if (sql.startsWith("UPDATE jobs SET state='interrupted' WHERE job_id=?")) {
+          const [id,device,now,revision,digest]=args;
+          const row=db.jobs.get(id);
+          if (!row || row.device!==device || row.state!=="leased" ||
+              row.lease_until<=now || db.policyState?.revision!==revision ||
+              db.policyState?.digest!==digest) return null;
+          row.state="interrupted";return {job_id:id};
+        }
+        if (sql.startsWith("UPDATE jobs SET state=?")) {
+          const [status,result,id,device,now,revision,digest]=args;
+          const row=db.jobs.get(id);
+          if (!row||row.device!==device||row.state!=="leased"||row.lease_until<=now ||
+              db.policyState?.revision!==revision || db.policyState?.digest!==digest)
             return null;
           row.state=status;row.result_json=result;
           return {job_id:id};
@@ -84,6 +100,15 @@ const req=(path,method="GET",body=null,token=null,device=null) => {
 };
 const job=(id="job_001",op="snapshot")=>({job_id:id,capability:"windows_diagnostics",
   operation:op,device:"office_pc",payload:{}});
+
+async function signRotatedPolicy(env,revision,enabled) {
+  const data=JSON.parse(env.OWNER_POLICY_JSON);
+  data.revision=revision;
+  data.capabilities.windows_diagnostics.enabled=enabled;
+  env.OWNER_POLICY_JSON=JSON.stringify(data);
+  env.OWNER_POLICY_SIGNATURE_B64=b64(await crypto.subtle.sign("Ed25519",
+    env.TEST_PRIVATE_KEY,new TextEncoder().encode(env.OWNER_POLICY_JSON)));
+}
 
 test("public health provides no private data",async()=>{
   const r=await gateway.fetch(req("/health"),{});
@@ -203,4 +228,50 @@ test("missing owner policy revision state fails closed",async()=>{
   const env=await policyEnv();
   env.DB.prepare=()=>{throw Error("missing owner_policy_state table")};
   assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r06"),TOKEN),env)).status,503);
+});
+
+test("revocation after lease quarantines completion instead of claiming success",async()=>{
+  const env=await policyEnv();
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("leased_r01"),TOKEN),env)).status,202);
+  const claim=await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env);
+  assert.equal(claim.status,200);
+  assert.equal(env.DB.jobs.get("leased_r01").state,"leased");
+  await signRotatedPolicy(env,2,false);
+  const done={job_id:"leased_r01",state:"succeeded",result:{ram_used_percent:80}};
+  const refused=await gateway.fetch(req("/v1/device/complete","POST",done,DEVICE,"office_pc"),env);
+  assert.equal(refused.status,403);
+  assert.equal((await refused.json()).error,"grant_revoked_after_lease");
+  assert.equal(env.DB.jobs.get("leased_r01").state,"interrupted");
+  assert.equal((await gateway.fetch(req("/v1/device/complete","POST",done,DEVICE,"office_pc"),env)).status,409);
+});
+test("renewed authorized lease completion works with newer signed policy",async()=>{
+  const env=await policyEnv();
+  await gateway.fetch(req("/v1/jobs","POST",job("leased_r02"),TOKEN),env);
+  assert.equal((await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env)).status,200);
+  await signRotatedPolicy(env,2,true);
+  const done={job_id:"leased_r02",state:"succeeded",result:{}};
+  assert.equal((await gateway.fetch(req("/v1/device/complete","POST",done,DEVICE,"office_pc"),env)).status,200);
+  assert.equal(env.DB.jobs.get("leased_r02").state,"succeeded");
+});
+test("completion policy revision race is denied atomically",async()=>{
+  const env=await policyEnv();
+  await gateway.fetch(req("/v1/jobs","POST",job("leased_r03"),TOKEN),env);
+  assert.equal((await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env)).status,200);
+  const oldPrepare=env.DB.prepare.bind(env.DB);
+  env.DB.prepare=(sql)=>{
+    const prepared=oldPrepare(sql);
+    if (!sql.startsWith("SELECT capability,operation,device FROM jobs")) return prepared;
+    return {bind(...args){
+      const stmt=prepared.bind(...args);
+      return {async first(){
+        const lease=await stmt.first();
+        env.DB.policyState.revision+=1; // isolate concurrent signed policy update
+        return lease;
+      }};
+    }};
+  };
+  const done={job_id:"leased_r03",state:"succeeded",result:{}};
+  const reply=await gateway.fetch(req("/v1/device/complete","POST",done,DEVICE,"office_pc"),env);
+  assert.equal(reply.status,409);
+  assert.equal(env.DB.jobs.get("leased_r03").state,"leased");
 });
