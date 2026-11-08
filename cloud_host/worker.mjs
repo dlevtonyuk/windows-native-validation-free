@@ -108,11 +108,17 @@ export default {
           return response(400,{error:"invalid_job"});
         if (!permitted(caps,job.capability,job.operation,job.device))
           return response(403,{error:"capability_disabled_or_out_of_scope"});
+        // Submit only while this exact signed revision remains current in D1.
+        // An owner revocation racing this request cannot create an old-policy job.
         try {
-          await env.DB.prepare(
-            "INSERT INTO jobs(job_id,capability,operation,device,payload_json,state,created_at) VALUES (?,?,?,?,?,'queued',?)"
+          const inserted=await env.DB.prepare(
+            "INSERT INTO jobs(job_id,capability,operation,device,payload_json,state,created_at) "+
+            "SELECT ?,?,?,?,?,'queued',? WHERE EXISTS "+
+            "(SELECT 1 FROM owner_policy_state WHERE id=1 AND highest_revision=? "+
+            "AND payload_sha256=?) RETURNING job_id"
           ).bind(job.job_id,job.capability,job.operation,job.device,
-                 JSON.stringify(job.payload),Date.now()).run();
+                 JSON.stringify(job.payload),Date.now(),revision,hash).first();
+          if (!inserted) return response(409,{error:"policy_changed_during_submission"});
         }catch {return response(409,{error:"duplicate_job_or_storage_unavailable"});}
         return response(202,{job_id:job.job_id,state:"queued"});
       }
@@ -130,9 +136,20 @@ export default {
         // A single atomic claim, without issuing arbitrary local commands.
         // Subsequent adapter must independently verify operation/owner grant.
         const row=await env.DB.prepare(
-          "UPDATE jobs SET state='leased',lease_until=? WHERE job_id=(SELECT job_id FROM jobs WHERE state='queued' AND device=? ORDER BY created_at LIMIT 1) RETURNING job_id,capability,operation,device,payload_json"
-        ).bind(Date.now()+30000,device).first();
-        if (!row) return response(200,{state:"empty"});
+          "UPDATE jobs SET state='leased',lease_until=? WHERE job_id="+
+          "(SELECT job_id FROM jobs WHERE state='queued' AND device=? "+
+          "ORDER BY created_at LIMIT 1) AND EXISTS "+
+          "(SELECT 1 FROM owner_policy_state WHERE id=1 AND highest_revision=? "+
+          "AND payload_sha256=?) RETURNING job_id,capability,operation,device,payload_json"
+        ).bind(Date.now()+30000,device,revision,hash).first();
+        if (!row) {
+          const current=await env.DB.prepare(
+            "SELECT 1 AS matched FROM owner_policy_state WHERE id=1 AND "+
+            "highest_revision=? AND payload_sha256=?"
+          ).bind(revision,hash).first();
+          return current?response(200,{state:"empty"}):
+            response(409,{error:"policy_changed_during_claim"});
+        }
         if (!permitted(caps,row.capability,row.operation,row.device)){
           await env.DB.prepare(
             "UPDATE jobs SET state='interrupted' WHERE job_id=? AND state='leased'"
