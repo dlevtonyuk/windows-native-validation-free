@@ -23,11 +23,12 @@ try{
  Write-Host 'WINDOWS_NATIVE_LAB_STARTED'
  $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
  Assert (Test-Path $ps) 'Windows PowerShell executable'
- $encodedSlow=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 10'))
- $slow=RunBounded $ps ('-NoProfile -NonInteractive -EncodedCommand '+$encodedSlow) 1200
- Write-Host ('SLOW_TEST_RESULT timeout='+$slow.TimedOut+' exit='+$slow.Exit+' stderr='+($slow.Stderr -replace '[\\r\\n]+',' '))
- Assert $slow.TimedOut 'Timed-out subprocess terminated'
  $py=(Get-Command python.exe -ErrorAction Stop).Source
+ $slowFile=Join-Path $dir 'sleeper.py'
+ [IO.File]::WriteAllText($slowFile,'import time'+[Environment]::NewLine+'time.sleep(10)'+[Environment]::NewLine)
+ $slow=RunBounded $py ('"'+$slowFile+'"') 1200
+ Write-Host ('SLOW_TEST_RESULT timeout='+$slow.TimedOut+' exit='+$slow.Exit+' stdout='+($slow.Stdout -replace '[\\r\\n]+',' ')+' stderr='+($slow.Stderr -replace '[\\r\\n]+',' '))
+ Assert $slow.TimedOut 'Timed-out subprocess terminated'
  $pyFile=Join-Path $dir 'check.py'
  [IO.File]::WriteAllText($pyFile,'print("ok")'+[Environment]::NewLine)
  $syntax=RunBounded $py ('-m py_compile "'+$pyFile+'"') 10000
