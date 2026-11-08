@@ -43,6 +43,11 @@ jobs:
         run: |
           node --test cloud_host/worker.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate Cloudflare D1 SQLite schema locally
+        shell: pwsh
+        run: |
+          python cloud_host/check_schema.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   gateway-linux:
     if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-24.04
@@ -65,3 +70,6 @@ jobs:
       - name: Validate signed cloud control plane and D1 queue mock
         shell: bash
         run: node --test cloud_host/worker.test.mjs
+      - name: Validate Cloudflare D1 SQLite schema locally
+        shell: bash
+        run: python3 cloud_host/check_schema.py
