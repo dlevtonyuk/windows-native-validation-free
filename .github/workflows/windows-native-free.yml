@@ -1,0 +1,48 @@
+# Staging template only. This is deliberately outside .github/workflows/
+# so the existing private repository cannot start a Windows runner.
+# Publish only generic, nonconfidential tests to a separately approved
+# public repository; publishing any production files is prohibited.
+name: Free Public Windows Native Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-native-free.yml'
+      - 'tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-free-windows-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-windows:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - name: Check out generic tests without retaining credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Assert public-only / GitHub-hosted Windows
+        shell: pwsh
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if ($env:REPO_PRIVATE -ne 'false') { throw 'PUBLIC_ONLY_TEST_REFUSED' }
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'NOT_HOSTED_WINDOWS_RUNNER' }
+      - name: Validate native Windows APIs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\Test-WindowsNative.ps1
+      - name: Validate simulated trace ownership
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\Test-OwnershipRecovery.ps1
