@@ -57,8 +57,11 @@ function RequireOK($result,[string]$where) {
 function Persist($state) {
     $tmp=$ownerPath+'.new-'+[guid]::NewGuid().ToString('N')
     [IO.File]::WriteAllText($tmp,($state|ConvertTo-Json -Depth 5 -Compress),$utf8)
-    if ([IO.File]::Exists($ownerPath)) { [IO.File]::Replace($tmp,$ownerPath,$null) }
-    else { [IO.File]::Move($tmp,$ownerPath) }
+    if ([IO.File]::Exists($ownerPath)) {
+        $backup=$ownerPath+'.backup-'+[guid]::NewGuid().ToString('N')
+        [IO.File]::Replace($tmp,$ownerPath,$backup)
+        if ([IO.File]::Exists($backup)) { [IO.File]::Delete($backup) }
+    } else { [IO.File]::Move($tmp,$ownerPath) }
 }
 function ReadOwner() {
     if (-not (Test-Path -LiteralPath $ownerPath)) {return $null}
