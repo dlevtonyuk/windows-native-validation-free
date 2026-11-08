@@ -6,9 +6,9 @@ New-Item -ItemType Directory -Path $dir | Out-Null
 $taskName='ChatGPT-Lab-'+[guid]::NewGuid().ToString('N')
 $created=$false
 function Assert([bool]$valid,[string]$message){if(-not $valid){throw "FAIL: $message"};Write-Host "PASS: $message"}
-function RunBounded([string]$exe,[string]$args,[int]$timeoutMs){
+function RunBounded([string]$exe,[string]$commandArguments,[int]$timeoutMs){
  $p=New-Object Diagnostics.Process
- $p.StartInfo.FileName=$exe;$p.StartInfo.Arguments=$args
+ $p.StartInfo.FileName=$exe;$p.StartInfo.Arguments=$commandArguments
  $p.StartInfo.UseShellExecute=$false;$p.StartInfo.CreateNoWindow=$true
  $p.StartInfo.RedirectStandardOutput=$true;$p.StartInfo.RedirectStandardError=$true
  try{
