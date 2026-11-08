@@ -72,7 +72,7 @@ async function ownerPolicy(env) {
       "RETURNING highest_revision"
     ).bind(document.revision,hash).first();
     if (!state || state.highest_revision!==document.revision) return null;
-    return document.capabilities;
+    return {capabilities:document.capabilities,revision:document.revision,hash};
   }catch {return null;}
 }
 function permitted(caps,cap,op,device) {
@@ -93,8 +93,9 @@ export default {
     if (url.pathname==="/health" && request.method==="GET")
       return response(200,{service:"universal-gateway",status:"no_public_capabilities"});
     // Fail closed if owner has not configured an authenticated, signed policy.
-    const caps=await ownerPolicy(env);
-    if (!caps) return response(503,{error:"owner_activation_not_configured"});
+    const policy=await ownerPolicy(env);
+    if (!policy) return response(503,{error:"owner_activation_not_configured"});
+    const {capabilities:caps,revision,hash}=policy;
     try {
       if (url.pathname==="/v1/jobs" && request.method==="POST") {
         if (!await auth(request,env.SUBMIT_TOKEN))
@@ -152,11 +153,32 @@ export default {
             typeof data.result!=="object" || !data.result ||
             JSON.stringify(data.result).length>1024)
           return response(400,{error:"invalid_completion"});
+        // Completion is NOT authorization for an already leased operation:
+        // recheck the current owner grant and match the policy revision in
+        // the SAME D1 statement that records a job's completion.
+        const lease=await env.DB.prepare(
+          "SELECT capability,operation,device FROM jobs WHERE job_id=? AND device=? AND state='leased' AND lease_until>?"
+        ).bind(data.job_id,device,Date.now()).first();
+        if (!lease) return response(409,{error:"not_leased_or_lease_expired"});
+        const guard=" AND EXISTS (SELECT 1 FROM owner_policy_state WHERE id=1 "+
+          "AND highest_revision=? AND payload_sha256=?) RETURNING job_id";
+        if (!permitted(caps,lease.capability,lease.operation,lease.device)) {
+          // Never silently relabel a side effect already in flight as undone.
+          // Quarantine for owner reconciliation; do not auto-replay it.
+          const interrupted=await env.DB.prepare(
+            "UPDATE jobs SET state='interrupted' WHERE job_id=? AND device=? "+
+            "AND state='leased' AND lease_until>?"+guard
+          ).bind(data.job_id,device,Date.now(),revision,hash).first();
+          return interrupted?response(403,{error:"grant_revoked_after_lease"}):
+            response(409,{error:"lease_or_policy_changed"});
+        }
         const row=await env.DB.prepare(
-          "UPDATE jobs SET state=?,result_json=? WHERE job_id=? AND device=? AND state='leased' AND lease_until>? RETURNING job_id"
-        ).bind(data.state,JSON.stringify(data.result),data.job_id,device,Date.now()).first();
+          "UPDATE jobs SET state=?,result_json=? WHERE job_id=? AND device=? "+
+          "AND state='leased' AND lease_until>?"+guard
+        ).bind(data.state,JSON.stringify(data.result),data.job_id,device,
+               Date.now(),revision,hash).first();
         return row?response(200,{job_id:data.job_id,state:data.state}):
-          response(409,{error:"not_leased_or_lease_expired"});
+          response(409,{error:"lease_or_policy_changed"});
       }
       return response(404,{error:"unsupported_operation"});
     }catch (e){
