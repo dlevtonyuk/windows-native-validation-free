@@ -136,7 +136,7 @@ test("public health provides no private data",async()=>{
   assert.deepEqual(Object.keys(await r.json()).sort(),["service","status"]);
 });
 test("missing activation denies jobs",async()=>{
-  const r=await gateway.fetch(req("/v1/jobs","POST",job(),TOKEN),{});
+  const r=await gateway.fetch(req("/v1/jobs","POST",job(),TOKEN),{SUBMIT_TOKEN:TOKEN});
   assert.equal(r.status,503);
 });
 test("forged owner signature fails closed",async()=>{
