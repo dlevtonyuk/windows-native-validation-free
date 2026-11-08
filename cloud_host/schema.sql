@@ -15,3 +15,12 @@ CREATE INDEX IF NOT EXISTS idx_jobs_device_state_created
   ON jobs(device, state, created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_lease
   ON jobs(state, lease_until);
+
+-- Owner-policy revision high watermark. Prototype protection against
+-- reusing older owner-signed capability grants after a newer one is observed.
+-- Backups, independent owner identity and anti-tamper audit still required.
+CREATE TABLE IF NOT EXISTS owner_policy_state (
+  id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+  highest_revision INTEGER NOT NULL CHECK (highest_revision >= 1),
+  payload_sha256 TEXT NOT NULL
+);
