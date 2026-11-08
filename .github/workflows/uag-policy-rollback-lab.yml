@@ -29,3 +29,40 @@ jobs:
         run: python cloud_host/check_schema.py
       - name: Generic gateway safety and device adapter tests
         run: python -m unittest discover -s gateway_tests -q
+
+  cloudflare-engine-offline:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Wrangler in disposable runner only
+        run: npm install --no-save --ignore-scripts wrangler@4.119.0
+      - name: Apply schema with actual local Cloudflare D1 engine
+        run: npx wrangler d1 execute DB --local --config cloud_host/wrangler.lab.toml --file cloud_host/schema.sql --yes
+      - name: Verify actual local D1 policy revision table
+        run: |
+          npx wrangler d1 execute DB --local --config cloud_host/wrangler.lab.toml --command "SELECT id,highest_revision,payload_sha256 FROM owner_policy_state" --json
+      - name: Verify real local workerd enforces no owner activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --ip 127.0.0.1 --port 8787 --config cloud_host/wrangler.lab.toml > /tmp/uag-local-workerd.log 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for n in $(seq 1 35); do
+            if curl --max-time 2 -fsS http://127.0.0.1:8787/health -o /tmp/uag-health.json; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then cat /tmp/uag-local-workerd.log; exit 1; fi
+          grep -q '"no_public_capabilities"' /tmp/uag-health.json
+          code=$(curl --max-time 3 -s -o /tmp/uag-denied.json -w '%{http_code}' -X POST http://127.0.0.1:8787/v1/jobs -H 'Content-Type: application/json' -d '{"job_id":"lab_001"}')
+          test "$code" = 503
+          grep -q '"owner_activation_not_configured"' /tmp/uag-denied.json
+          echo 'OFFLINE_WORKER_DENY_BY_DEFAULT_OK'
