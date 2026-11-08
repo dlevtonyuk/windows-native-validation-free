@@ -9,7 +9,7 @@ const TOKEN = "dummy-submit-token-for-public-tests-only-00000001";
 const DEVICE = "dummy-device-token-for-public-tests-only-0000001";
 
 class MockD1 {
-  constructor() { this.jobs = new Map(); }
+  constructor() { this.jobs = new Map(); this.policyState = null; }
   prepare(sql) {
     const db=this;
     return { bind(...args) { return {
@@ -34,6 +34,14 @@ class MockD1 {
         return {success:true};
       },
       async first() {
+        if (sql.startsWith("INSERT INTO owner_policy_state")) {
+          const [revision,digest]=args;
+          const previous=db.policyState;
+          if (previous && (revision<previous.revision ||
+              (revision===previous.revision && digest!==previous.digest))) return null;
+          if (!previous || revision>previous.revision) db.policyState={revision,digest};
+          return {highest_revision:revision};
+        }
         if (sql.startsWith("UPDATE jobs SET state='leased'")) {
           const [lease,device] = args;
           const row=[...db.jobs.values()].filter(j=>j.state==="queued"&&j.device===device)
@@ -57,14 +65,14 @@ class MockD1 {
 }
 async function policyEnv(enabled=true) {
   const keys=await crypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
-  const grant={version:1,owner:"local_owner",expires_utc:"2099-01-01T00:00:00Z",
+  const grant={version:1,owner:"local_owner",revision:1,expires_utc:"2099-01-01T00:00:00Z",
     capabilities:{windows_diagnostics:{enabled,operations:["snapshot"],devices:["office_pc"]}}};
   const data=JSON.stringify(grant);
   const sig=await crypto.subtle.sign("Ed25519",keys.privateKey,new TextEncoder().encode(data));
   const pub=await crypto.subtle.exportKey("raw",keys.publicKey);
   return {DB:new MockD1(),OWNER_POLICY_JSON:data,OWNER_PUBLIC_KEY_B64:b64(pub),
     OWNER_POLICY_SIGNATURE_B64:b64(sig),SUBMIT_TOKEN:TOKEN,
-    DEVICE_TOKENS_JSON:JSON.stringify({office_pc:DEVICE})};
+    DEVICE_TOKENS_JSON:JSON.stringify({office_pc:DEVICE}),TEST_PRIVATE_KEY:keys.privateKey};
 }
 const url = (path) => "https://example.invalid" + path;
 const req=(path,method="GET",body=null,token=null,device=null) => {
@@ -163,4 +171,36 @@ test("expired lease quarantined, never blindly replayed",async()=>{
   assert.equal(r.status,200);
   assert.equal((await r.json()).state,"empty");
   assert.equal(env.DB.jobs.get("job_001").state,"interrupted");
+});
+
+test("valid previous owner-signed policy cannot restore revoked grant", async()=>{
+  const env=await policyEnv();
+  const oldJSON=env.OWNER_POLICY_JSON;
+  const oldSig=env.OWNER_POLICY_SIGNATURE_B64;
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r01"),TOKEN),env)).status,202);
+  const newest=JSON.parse(oldJSON);
+  newest.revision=2;
+  newest.capabilities.windows_diagnostics.enabled=false;
+  env.OWNER_POLICY_JSON=JSON.stringify(newest);
+  env.OWNER_POLICY_SIGNATURE_B64=b64(await crypto.subtle.sign(
+    "Ed25519",env.TEST_PRIVATE_KEY,new TextEncoder().encode(env.OWNER_POLICY_JSON)));
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r02"),TOKEN),env)).status,403);
+  env.OWNER_POLICY_JSON=oldJSON;
+  env.OWNER_POLICY_SIGNATURE_B64=oldSig;
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r03"),TOKEN),env)).status,503);
+});
+test("same revision with different valid signed policy is rejected",async()=>{
+  const env=await policyEnv();
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r04"),TOKEN),env)).status,202);
+  const changed=JSON.parse(env.OWNER_POLICY_JSON);
+  changed.capabilities.windows_diagnostics.enabled=false;
+  env.OWNER_POLICY_JSON=JSON.stringify(changed);
+  env.OWNER_POLICY_SIGNATURE_B64=b64(await crypto.subtle.sign(
+    "Ed25519",env.TEST_PRIVATE_KEY,new TextEncoder().encode(env.OWNER_POLICY_JSON)));
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r05"),TOKEN),env)).status,503);
+});
+test("missing owner policy revision state fails closed",async()=>{
+  const env=await policyEnv();
+  env.DB.prepare=()=>{throw Error("missing owner_policy_state table")};
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("job_r06"),TOKEN),env)).status,503);
 });
