@@ -7,6 +7,7 @@ on:
     paths:
       - 'gateway_core/**'
       - 'gateway_tests/**'
+      - 'cloud_host/**'
       - '.github/workflows/gateway-portable.yml'
   workflow_dispatch:
 
@@ -37,6 +38,11 @@ jobs:
         run: |
           python -m unittest discover -s gateway_tests -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate signed cloud control plane and D1 queue mock
+        shell: pwsh
+        run: |
+          node --test cloud_host/worker.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   gateway-linux:
     if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-24.04
@@ -56,3 +62,6 @@ jobs:
       - name: Run deny-by-default and offline-recovery tests
         shell: bash
         run: python3 -m unittest discover -s gateway_tests -v
+      - name: Validate signed cloud control plane and D1 queue mock
+        shell: bash
+        run: node --test cloud_host/worker.test.mjs
