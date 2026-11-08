@@ -23,7 +23,9 @@ try{
  Write-Host 'WINDOWS_NATIVE_LAB_STARTED'
  $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
  Assert (Test-Path $ps) 'Windows PowerShell executable'
- $slow=RunBounded $ps '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 10"' 1200
+ $encodedSlow=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Seconds 10'))
+ $slow=RunBounded $ps ('-NoProfile -NonInteractive -EncodedCommand '+$encodedSlow) 1200
+ Write-Host ('SLOW_TEST_RESULT timeout='+$slow.TimedOut+' exit='+$slow.Exit+' stderr='+($slow.Stderr -replace '[\\r\\n]+',' '))
  Assert $slow.TimedOut 'Timed-out subprocess terminated'
  $py=(Get-Command python.exe -ErrorAction Stop).Source
  $pyFile=Join-Path $dir 'check.py'
