@@ -10,6 +10,8 @@ on:
     paths:
       - '.github/workflows/windows-native-free.yml'
       - 'tests/**'
+      - 'gateway_core/**'
+      - 'gateway_tests/**'
   workflow_dispatch:
 
 permissions:
@@ -36,6 +38,10 @@ jobs:
         run: |
           if ($env:REPO_PRIVATE -ne 'false') { throw 'PUBLIC_ONLY_TEST_REFUSED' }
           if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'NOT_HOSTED_WINDOWS_RUNNER' }
+      - name: Validate portable gateway authorization and durable jobs
+        shell: pwsh
+        run: |
+          python -m unittest discover -s gateway_tests -v
       - name: Validate native Windows APIs
         shell: powershell
         run: |
@@ -87,3 +93,24 @@ jobs:
               & .\tests\Invoke-IsolatedCapture.ps1 -Mode Recover -Root $_.FullName
             }
           }
+
+  portable-gateway-linux:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Check out generic gateway core
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify free hosted Linux runner
+        shell: bash
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          test "$REPO_PRIVATE" = "false"
+          test "$RUNNER_ENVIRONMENT" = "github-hosted"
+          test "$RUNNER_OS" = "Linux"
+      - name: Validate portable gateway authorization and durable jobs
+        shell: bash
+        run: python3 -m unittest discover -s gateway_tests -v
