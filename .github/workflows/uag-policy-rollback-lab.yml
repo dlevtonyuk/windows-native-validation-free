@@ -37,6 +37,23 @@ jobs:
           if ($result.provenance -ne 'DISPOSABLE_GITHUB_WINDOWS_HOST_NOT_USER_PC') { throw 'INVALID_PROVENANCE' }
           if ($result.provider_query_state -eq 'QUERY_SUPPORTED' -and -not $result.provider_host_pid_field) { throw 'INVALID_WMI_PID_PROJECTION' }
           Write-Host ('WMI_PROVIDER_MAP_TEST: ' + ($result | ConvertTo-Json -Compress))
+      - name: Read-only WMI provider operation delta and PID mapping fixture
+        if: ${{ matrix.os == 'windows-2025' }}
+        shell: pwsh
+        run: |
+          $providers=@(Get-CimInstance -Namespace root\cimv2 -ClassName MSFT_Providers -ErrorAction Stop)
+          $hosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='WmiPrvSE.exe'" -ErrorAction Stop)
+          $ids=@{}; foreach($h in $hosts){$ids[[string]$h.ProcessId]=$true}
+          $match=@($providers | Where-Object {
+            $null -ne $_.HostProcessIdentifier -and $ids.ContainsKey([string]$_.HostProcessIdentifier)
+          } | Select-Object -First 1)
+          if($match.Count -eq 0) {throw 'NO_RUNNING_WMI_PROVIDER_TO_TEST'}
+          $pidTarget=[int]$match[0].HostProcessIdentifier
+          $r=& ./tests/Get-WmiProviderHostEvidence.ps1 -TargetPid $pidTarget -SampleSeconds 1 | ConvertFrom-Json
+          if($r.schema -ne 1 -or -not $r.read_only -or $r.target_pid -ne $pidTarget -or $r.provider_count -lt 1) {throw 'WMI_READONLY_MAPPING_VALIDATION_FAILED'}
+          if(@($r.providers).Count -ne $r.provider_count) {throw 'WMI_PROVIDER_COUNT_MISMATCH'}
+          Write-Host ('WMI_TARGETED_READ_ONLY_PROVIDER_PROBE_PASSED: count='+$r.provider_count+', event_status='+$r.recent_event_status)
+
 
 
   cloudflare-engine-offline:
