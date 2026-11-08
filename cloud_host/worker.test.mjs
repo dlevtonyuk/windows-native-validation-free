@@ -14,6 +14,18 @@ class MockD1 {
     const db=this;
     return { bind(...args) { return {
       async run() {
+        if (sql.startsWith("UPDATE jobs SET state='interrupted' WHERE state='leased'")) {
+          const [now,device]=args;
+          for (const row of db.jobs.values())
+            if (row.state==="leased"&&row.lease_until<now&&row.device===device)
+              row.state="interrupted";
+          return {success:true};
+        }
+        if (sql.startsWith("UPDATE jobs SET state='interrupted' WHERE job_id=?")) {
+          const row=db.jobs.get(args[0]);
+          if (row?.state==="leased") row.state="interrupted";
+          return {success:true};
+        }
         if (!sql.startsWith("INSERT INTO jobs")) throw Error("unexpected SQL");
         const [id,cap,op,device,payload,created] = args;
         if (db.jobs.has(id)) throw Error("duplicate");
@@ -140,4 +152,15 @@ test("expired signed policy fails closed",async()=>{
   env.OWNER_POLICY_SIGNATURE_B64=b64(await crypto.subtle.sign(
     "Ed25519",keyPair.privateKey,new TextEncoder().encode(env.OWNER_POLICY_JSON)));
   assert.equal((await gateway.fetch(req("/v1/jobs","POST",job(),TOKEN),env)).status,503);
+});
+
+test("expired lease quarantined, never blindly replayed",async()=>{
+  const env=await policyEnv();
+  await gateway.fetch(req("/v1/jobs","POST",job(),TOKEN),env);
+  await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env);
+  env.DB.jobs.get("job_001").lease_until=Date.now()-1000;
+  const r=await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env);
+  assert.equal(r.status,200);
+  assert.equal((await r.json()).state,"empty");
+  assert.equal(env.DB.jobs.get("job_001").state,"interrupted");
 });
