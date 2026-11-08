@@ -1,0 +1,31 @@
+# Isolated, no-secret feature-branch test only. No deployment step.
+name: UAG Policy Rollback Research
+on:
+  push:
+    branches:
+      - research/uag-policy-rollback-20261108
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uag-policy-rollback-research-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  offline-policy-test:
+    if: ${{ github.event.repository.private == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Unit tests with ephemeral synthetic grant keys
+        run: node --test cloud_host/worker.test.mjs
+      - name: Check D1 SQLite schema
+        run: python cloud_host/check_schema.py
+      - name: Generic gateway safety and device adapter tests
+        run: python -m unittest discover -s gateway_tests -q
