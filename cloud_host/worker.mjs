@@ -1,0 +1,142 @@
+// Cloudflare Workers Free + D1 control-plane prototype. Generic/NO SECRETS.
+// No endpoints exist until OWNER_PUBLIC_KEY_B64, OWNER_POLICY_JSON,
+// OWNER_POLICY_SIGNATURE_B64, SUBMIT_TOKEN, DEVICE_TOKENS_JSON and DB are
+// provisioned by the actual owner. Never deploy with test keys or real data.
+const idPattern = /^[a-z][a-z0-9_-]{2,63}$/;
+const maxBody = 4096;
+const response = (code, body) => new Response(JSON.stringify(body), {
+  status: code, headers: {"content-type":"application/json","cache-control":"no-store",
+    "x-content-type-options":"nosniff"}
+});
+const base64Bytes = str => Uint8Array.from(atob(str), c=>c.charCodeAt(0));
+const encoded = str => new TextEncoder().encode(str);
+const validId = s => typeof s === "string" && idPattern.test(s);
+
+async function tokenMatches(provided, correct) {
+  if (typeof correct !== "string" || correct.length < 32 || typeof provided !== "string")
+    return false;
+  const [a,b] = await Promise.all([crypto.subtle.digest("SHA-256", encoded(provided)),
+                                    crypto.subtle.digest("SHA-256", encoded(correct))]);
+  const left=new Uint8Array(a), right=new Uint8Array(b);
+  let diff=0;
+  for (let i=0;i<left.length;i++) diff|=left[i]^right[i];
+  return diff===0;
+}
+async function parseBody(request) {
+  const len=Number(request.headers.get("content-length") || 0);
+  if (len > maxBody) throw new Error("body_too_large");
+  const raw=await request.text();
+  if (raw.length>maxBody) throw new Error("body_too_large");
+  const result=JSON.parse(raw);
+  if (!result || typeof result!=="object" || Array.isArray(result))
+    throw new Error("invalid_json_object");
+  return result;
+}
+async function ownerPolicy(env) {
+  if (!env.DB || !env.OWNER_PUBLIC_KEY_B64 || !env.OWNER_POLICY_JSON
+      || !env.OWNER_POLICY_SIGNATURE_B64) return null;
+  try {
+    const key=await crypto.subtle.importKey("raw",base64Bytes(env.OWNER_PUBLIC_KEY_B64),
+      {name:"Ed25519"},false,["verify"]);
+    const authentic=await crypto.subtle.verify(
+      {name:"Ed25519"},key,base64Bytes(env.OWNER_POLICY_SIGNATURE_B64),
+      encoded(env.OWNER_POLICY_JSON));
+    if (!authentic) return null;
+    const document=JSON.parse(env.OWNER_POLICY_JSON);
+    if (Object.keys(document).sort().join(",") !==
+        "capabilities,expires_utc,owner,version" || document.version!==1 ||
+        document.owner!=="local_owner" ||
+        !Number.isFinite(Date.parse(document.expires_utc)) ||
+        Date.parse(document.expires_utc)<=Date.now() ||
+        !document.capabilities || typeof document.capabilities!=="object") return null;
+    for (const [name,p] of Object.entries(document.capabilities)){
+      if (!validId(name) || !p || typeof p.enabled!=="boolean" ||
+          !Array.isArray(p.operations) || !Array.isArray(p.devices) ||
+          p.operations.length>64 || p.devices.length>64 ||
+          !p.operations.every(validId) || !p.devices.every(validId)) return null;
+    }
+    return document.capabilities;
+  }catch {return null;}
+}
+function permitted(caps,cap,op,device) {
+  if (![cap,op,device].every(validId)) return false;
+  const rule=caps[cap];
+  return !!(rule && rule.enabled===true &&
+    rule.operations.includes(op) && rule.devices.includes(device));
+}
+async function auth(request, token) {
+  const header=request.headers.get("authorization") || "";
+  if (!header.startsWith("Bearer ")) return false;
+  return tokenMatches(header.slice(7),token);
+}
+
+export default {
+  async fetch(request,env) {
+    const url=new URL(request.url);
+    if (url.pathname==="/health" && request.method==="GET")
+      return response(200,{service:"universal-gateway",status:"no_public_capabilities"});
+    // Fail closed if owner has not configured an authenticated, signed policy.
+    const caps=await ownerPolicy(env);
+    if (!caps) return response(503,{error:"owner_activation_not_configured"});
+    try {
+      if (url.pathname==="/v1/jobs" && request.method==="POST") {
+        if (!await auth(request,env.SUBMIT_TOKEN))
+          return response(401,{error:"unauthorized"});
+        const job=await parseBody(request);
+        if (Object.keys(job).sort().join(",")!=="capability,device,job_id,operation,payload" ||
+          ![job.job_id,job.capability,job.operation,job.device].every(validId) ||
+          !job.payload || typeof job.payload!=="object" ||
+          Array.isArray(job.payload) || JSON.stringify(job.payload).length>1024)
+          return response(400,{error:"invalid_job"});
+        if (!permitted(caps,job.capability,job.operation,job.device))
+          return response(403,{error:"capability_disabled_or_out_of_scope"});
+        try {
+          await env.DB.prepare(
+            "INSERT INTO jobs(job_id,capability,operation,device,payload_json,state,created_at) VALUES (?,?,?,?,?,'queued',?)"
+          ).bind(job.job_id,job.capability,job.operation,job.device,
+                 JSON.stringify(job.payload),Date.now()).run();
+        }catch {return response(409,{error:"duplicate_job_or_storage_unavailable"});}
+        return response(202,{job_id:job.job_id,state:"queued"});
+      }
+      if (url.pathname==="/v1/device/claim" && request.method==="GET") {
+        const device=url.searchParams.get("device");
+        if (!validId(device)) return response(400,{error:"invalid_device"});
+        let tokens;
+        try {tokens=JSON.parse(env.DEVICE_TOKENS_JSON);}catch {return response(503,{error:"device_tokens_unconfigured"});}
+        if (!await auth(request,tokens?.[device])) return response(401,{error:"unauthorized"});
+        // A single atomic claim, without issuing arbitrary local commands.
+        // Subsequent adapter must independently verify operation/owner grant.
+        const row=await env.DB.prepare(
+          "UPDATE jobs SET state='leased',lease_until=? WHERE job_id=(SELECT job_id FROM jobs WHERE state='queued' AND device=? ORDER BY created_at LIMIT 1) RETURNING job_id,capability,operation,device,payload_json"
+        ).bind(Date.now()+30000,device).first();
+        if (!row) return response(200,{state:"empty"});
+        if (!permitted(caps,row.capability,row.operation,row.device))
+          return response(403,{error:"grant_revoked_after_queue"});
+        return response(200,{state:"leased",job_id:row.job_id,capability:row.capability,
+          operation:row.operation,device:row.device,payload:JSON.parse(row.payload_json)});
+      }
+      if (url.pathname==="/v1/device/complete" && request.method==="POST") {
+        const device=request.headers.get("x-device-id");
+        let tokens;
+        try {tokens=JSON.parse(env.DEVICE_TOKENS_JSON);}catch {return response(503,{error:"device_tokens_unconfigured"});}
+        if (!validId(device) || !await auth(request,tokens?.[device]))
+          return response(401,{error:"unauthorized"});
+        const data=await parseBody(request);
+        if (!validId(data.job_id) || !["succeeded","failed"].includes(data.state) ||
+            typeof data.result!=="object" || !data.result ||
+            JSON.stringify(data.result).length>1024)
+          return response(400,{error:"invalid_completion"});
+        const row=await env.DB.prepare(
+          "UPDATE jobs SET state=?,result_json=? WHERE job_id=? AND device=? AND state='leased' AND lease_until>? RETURNING job_id"
+        ).bind(data.state,JSON.stringify(data.result),data.job_id,device,Date.now()).first();
+        return row?response(200,{job_id:data.job_id,state:data.state}):
+          response(409,{error:"not_leased_or_lease_expired"});
+      }
+      return response(404,{error:"unsupported_operation"});
+    }catch (e){
+      if (e?.message==="body_too_large" || e?.message==="invalid_json_object" || e instanceof SyntaxError)
+        return response(400,{error:"invalid_request"});
+      return response(503,{error:"temporary_unavailable"});
+    }
+  }
+};
