@@ -62,6 +62,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & .\tests\Check-RunnerRelease.ps1 -ProbeOnly
+      - name: Verify zero-cost private runner bootstrap package without registration
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\bootstrap\Bootstrap-PrivateWindowsRunner.ps1 -Mode VerifyPackage
       - name: Verify real isolated WMI and WPR trace lifecycle plus crash recovery
         shell: powershell
         run: |
