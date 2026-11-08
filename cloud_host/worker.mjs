@@ -44,8 +44,9 @@ async function ownerPolicy(env) {
     if (!authentic) return null;
     const document=JSON.parse(env.OWNER_POLICY_JSON);
     if (Object.keys(document).sort().join(",") !==
-        "capabilities,expires_utc,owner,version" || document.version!==1 ||
+        "capabilities,expires_utc,owner,revision,version" || document.version!==1 ||
         document.owner!=="local_owner" ||
+        !Number.isSafeInteger(document.revision) || document.revision<1 ||
         !Number.isFinite(Date.parse(document.expires_utc)) ||
         Date.parse(document.expires_utc)<=Date.now() ||
         !document.capabilities || typeof document.capabilities!=="object") return null;
@@ -55,6 +56,22 @@ async function ownerPolicy(env) {
           p.operations.length>64 || p.devices.length>64 ||
           !p.operations.every(validId) || !p.devices.every(validId)) return null;
     }
+    // Owner-signed policies are pinned to a monotonic D1 high watermark.
+    // Same revision with different signed bytes or older revision is rejected.
+    // Missing DB/table fails closed; never treat a previously signed grant as current.
+    const hash=[...new Uint8Array(await crypto.subtle.digest(
+      "SHA-256",encoded(env.OWNER_POLICY_JSON)))].map(
+        x=>x.toString(16).padStart(2,"0")).join("");
+    const state=await env.DB.prepare(
+      "INSERT INTO owner_policy_state (id,highest_revision,payload_sha256) VALUES (1,?,?) "+
+      "ON CONFLICT(id) DO UPDATE SET "+
+      "highest_revision=excluded.highest_revision,payload_sha256=excluded.payload_sha256 "+
+      "WHERE excluded.highest_revision > owner_policy_state.highest_revision OR "+
+      "(excluded.highest_revision = owner_policy_state.highest_revision AND "+
+      "excluded.payload_sha256 = owner_policy_state.payload_sha256) "+
+      "RETURNING highest_revision"
+    ).bind(document.revision,hash).first();
+    if (!state || state.highest_revision!==document.revision) return null;
     return document.capabilities;
   }catch {return null;}
 }
