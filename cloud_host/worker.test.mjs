@@ -351,3 +351,36 @@ test("unchanged signed grants avoid repeated D1 row writes",async()=>{
   assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("reads_004"),TOKEN),env)).status,403);
   assert.equal(env.DB.policyRevisionWrites,2);
 });
+
+test("unauthenticated requests do not touch owner policy or D1",async()=>{
+  const env=await policyEnv();
+  // Even when the policy storage fails, invalid credentials cannot trigger it.
+  env.DB.prepare=()=>{throw Error("D1 access denied for unauthorized requests")};
+  for (const [path,method,body,token,device,expected] of [
+    ["/v1/jobs","POST",job("bad_auth_01"),null,null,401],
+    ["/v1/jobs","POST",job("bad_auth_02"),"wrong-token",null,401],
+    ["/v1/device/claim?device=office_pc","GET",null,"wrong-token",null,401],
+    ["/v1/device/complete","POST",{job_id:"bad_auth_03",state:"failed",result:{}},
+      "wrong-token","office_pc",401],
+    ["/v1/something-else","POST",{},TOKEN,null,404],
+    ["/v1/device/claim?device=%%%","GET",null,DEVICE,null,400]
+  ]) {
+    const reply=await gateway.fetch(req(path,method,body,token,device),env);
+    assert.equal(reply.status,expected,path+" must reject before D1");
+  }
+  assert.equal(env.DB.policyRevisionWrites,0);
+});
+test("unknown path and bad token bypass expensive signed-policy parsing",async()=>{
+  const env=await policyEnv();
+  Object.defineProperty(env,"OWNER_POLICY_JSON",{
+    get(){throw Error("No policy read permitted for unauthenticated requests")}
+  });
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("bad_auth_04")),env)).status,401);
+  assert.equal((await gateway.fetch(req("/v1/enable","POST",{},TOKEN),env)).status,404);
+});
+test("valid identity without owner policy still fails closed",async()=>{
+  const env=await policyEnv();
+  delete env.OWNER_POLICY_SIGNATURE_B64;
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("missing_01"),TOKEN),env)).status,503);
+  assert.equal((await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env)).status,503);
+});
