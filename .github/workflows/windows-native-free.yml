@@ -46,6 +46,17 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & .\tests\Test-OwnershipRecovery.ps1
+      - name: Validate read-only process, RAM and WMI service correlation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = Join-Path $env:RUNNER_TEMP ('pressure-'+[guid]::NewGuid().ToString('N')+'.json')
+          & .\tests\ReadOnly-Pressure.ps1 -SuspectPids $PID -OutFile $path
+          $r = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          if ($r.schema -ne 1 -or $r.process_count -lt 1 -or @($r.top_handles).Count -lt 1) { throw 'RESOURCE_PRESSURE_STRUCTURE_INVALID' }
+          if ($r.ram.used_pct -lt 0 -or $r.ram.used_pct -gt 100) { throw 'RESOURCE_PRESSURE_RAM_INVALID' }
+          Remove-Item -LiteralPath $path -Force
+          Write-Host 'RESOURCE_PRESSURE_PROBE_PASSED'
       - name: Verify real isolated WMI and WPR trace lifecycle plus crash recovery
         shell: powershell
         run: |
