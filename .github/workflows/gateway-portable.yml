@@ -1,0 +1,58 @@
+# Public generic gateway tests only; no production credentials or host access.
+name: Universal Gateway Cross-Platform Safety
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gateway_core/**'
+      - 'gateway_tests/**'
+      - '.github/workflows/gateway-portable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: universal-gateway-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gateway-windows:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify hosted public Windows
+        shell: pwsh
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if ($env:REPO_PRIVATE -ne 'false' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'FREE_HOSTED_WINDOWS_REQUIRED' }
+      - name: Run owner-grant, queue and real read-only Windows adapter tests
+        shell: pwsh
+        run: |
+          python -m unittest discover -s gateway_tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  gateway-linux:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify hosted public Linux
+        shell: bash
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          test "$REPO_PRIVATE" = "false"
+          test "$RUNNER_ENVIRONMENT" = "github-hosted"
+          test "$RUNNER_OS" = "Linux"
+      - name: Run deny-by-default and offline-recovery tests
+        shell: bash
+        run: python3 -m unittest discover -s gateway_tests -v
