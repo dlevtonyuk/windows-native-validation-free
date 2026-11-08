@@ -29,6 +29,15 @@ jobs:
         run: python cloud_host/check_schema.py
       - name: Generic gateway safety and device adapter tests
         run: python -m unittest discover -s gateway_tests -q
+      - name: Probe Microsoft read-only WMI provider-host attribution on disposable Windows
+        if: ${{ matrix.os == 'windows-2025' }}
+        shell: pwsh
+        run: |
+          $result = & ./tests/Test-Wmi-ProviderMapping.ps1 | ConvertFrom-Json
+          if ($result.provenance -ne 'DISPOSABLE_GITHUB_WINDOWS_HOST_NOT_USER_PC') { throw 'INVALID_PROVENANCE' }
+          if ($result.provider_query_state -eq 'QUERY_SUPPORTED' -and -not $result.provider_host_pid_field) { throw 'INVALID_WMI_PID_PROJECTION' }
+          Write-Host ('WMI_PROVIDER_MAP_TEST: ' + ($result | ConvertTo-Json -Compress))
+
 
   cloudflare-engine-offline:
     if: ${{ github.event.repository.private == false }}
