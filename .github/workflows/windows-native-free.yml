@@ -57,6 +57,11 @@ jobs:
           if ($r.ram.used_pct -lt 0 -or $r.ram.used_pct -gt 100) { throw 'RESOURCE_PRESSURE_RAM_INVALID' }
           Remove-Item -LiteralPath $path -Force
           Write-Host 'RESOURCE_PRESSURE_PROBE_PASSED'
+      - name: Validate official Windows runner release and SHA-256 metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\Check-RunnerRelease.ps1 -ProbeOnly
       - name: Verify real isolated WMI and WPR trace lifecycle plus crash recovery
         shell: powershell
         run: |
