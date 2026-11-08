@@ -162,7 +162,7 @@ try {
         started_utc=[DateTimeOffset]::UtcNow.ToString('o')
     }
     Persist $owner
-    $q=RunBounded $wevt ('sl '+$channel+' /e:true /rt:true /ms:16777216') 15000
+    $q=RunBounded $wevt ('sl '+$channel+' /e:true /rt:true /ms:16777216 /q:true') 15000
     RequireOK $q 'ENABLE_WMI'
     Write-Host 'LAB_WMI_ENABLED'
     if ($Mode -eq 'FaultAfterWmi') {throw 'SIMULATED_FAILURE_AFTER_WMI_ENABLE'}
