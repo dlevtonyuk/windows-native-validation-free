@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler dev --local --ip 127.0.0.1 --port 8787 --config cloud_host/wrangler.lab.toml > /tmp/uag-local-workerd.log 2>&1 &
+          npx wrangler dev --local --ip 127.0.0.1 --port 8787 --config cloud_host/wrangler.lab.toml --var SUBMIT_TOKEN:synthetic-public-offline-ci-token-00000001 > /tmp/uag-local-workerd.log 2>&1 &
           worker_pid=$!
           trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
           ready=0
@@ -90,8 +90,11 @@ jobs:
           if [ "$ready" -ne 1 ]; then cat /tmp/uag-local-workerd.log; exit 1; fi
           grep -q '"no_public_capabilities"' /tmp/uag-health.json
           code=$(curl --max-time 3 -s -o /tmp/uag-denied.json -w '%{http_code}' -X POST http://127.0.0.1:8787/v1/jobs -H 'Content-Type: application/json' -d '{"job_id":"lab_001"}')
+          test "$code" = 401
+          grep -q '"unauthorized"' /tmp/uag-denied.json
+          code=$(curl --max-time 3 -s -o /tmp/uag-signed-disabled.json -w '%{http_code}' -X POST http://127.0.0.1:8787/v1/jobs -H 'Content-Type: application/json' -H 'Authorization: Bearer synthetic-public-offline-ci-token-00000001' -d '{"job_id":"lab_001"}')
           test "$code" = 503
-          grep -q '"owner_activation_not_configured"' /tmp/uag-denied.json
+          grep -q '"owner_activation_not_configured"' /tmp/uag-signed-disabled.json
           echo 'OFFLINE_WORKER_DENY_BY_DEFAULT_OK'
       - name: Real local workerd signed grants, revocation and rollback
         run: node cloud_host/test_workerd_integration.mjs
