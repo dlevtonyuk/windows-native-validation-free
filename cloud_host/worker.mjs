@@ -62,16 +62,25 @@ async function ownerPolicy(env) {
     const hash=[...new Uint8Array(await crypto.subtle.digest(
       "SHA-256",encoded(env.OWNER_POLICY_JSON)))].map(
         x=>x.toString(16).padStart(2,"0")).join("");
-    const state=await env.DB.prepare(
+    // Only a NEWER signed revision writes D1. Repeated, unchanged policy
+    // checks are read-only to preserve the Workers Free D1 row-write quota.
+    // A same-revision signed substitution or an older grant still fails closed.
+    const advanced=await env.DB.prepare(
       "INSERT INTO owner_policy_state (id,highest_revision,payload_sha256) VALUES (1,?,?) "+
       "ON CONFLICT(id) DO UPDATE SET "+
       "highest_revision=excluded.highest_revision,payload_sha256=excluded.payload_sha256 "+
-      "WHERE excluded.highest_revision > owner_policy_state.highest_revision OR "+
-      "(excluded.highest_revision = owner_policy_state.highest_revision AND "+
-      "excluded.payload_sha256 = owner_policy_state.payload_sha256) "+
+      "WHERE excluded.highest_revision > owner_policy_state.highest_revision "+
       "RETURNING highest_revision"
     ).bind(document.revision,hash).first();
-    if (!state || state.highest_revision!==document.revision) return null;
+    if (!advanced) {
+      const identical=await env.DB.prepare(
+        "SELECT highest_revision FROM owner_policy_state "+
+        "WHERE id=1 AND highest_revision=? AND payload_sha256=?"
+      ).bind(document.revision,hash).first();
+      if (!identical) return null;
+    } else if(advanced.highest_revision!==document.revision) {
+      return null;
+    }
     return {capabilities:document.capabilities,revision:document.revision,hash};
   }catch {return null;}
 }
