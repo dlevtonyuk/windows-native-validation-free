@@ -93,6 +93,17 @@ try{
   const old=await signedPolicy(1,true);
   live=await launch(old);
   assert.equal(await submit(live,"lab_initial_001"),202,"Initial signed grant failed");
+  // Real workerd HTTP route, not just a mocked gateway unit test.
+  const rejected=await fetch(live.base+"/v1/jobs",{
+    method:"POST",
+    headers:{"authorization":"Bearer invalid-public-test-token"},
+    body:JSON.stringify({job_id:"not_authorized",payload:{}})
+  });
+  assert.equal(rejected.status,401,"Invalid token must fail before owner policy checks");
+  const unsupported=await fetch(live.base+"/v1/enable",{
+    method:"POST",headers:{"authorization":"Bearer "+SUBMIT},body:"{}"
+  });
+  assert.equal(unsupported.status,404,"Remote enable endpoint must not exist");
   const claim=await fetch(live.base+"/v1/device/claim?device=office_pc",{
     headers:{authorization:"Bearer "+DEVICE}
   });
@@ -127,6 +138,7 @@ try{
   await stop(live); live=null;
   console.log("WORKERD_REAL_D1_SIGNED_REVOCATION_ROLLBACK_PASSED");
   console.log("WORKERD_REAL_D1_LEASED_COMPLETION_REVOCATION_PASSED");
+  console.log("WORKERD_UNAUTHORIZED_PREFLIGHT_DENIED_PASSED");
 }finally{
   await stop(live);
   rmSync(persistence,{recursive:true,force:true});
