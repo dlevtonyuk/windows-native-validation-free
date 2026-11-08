@@ -104,14 +104,23 @@ export default {
         let tokens;
         try {tokens=JSON.parse(env.DEVICE_TOKENS_JSON);}catch {return response(503,{error:"device_tokens_unconfigured"});}
         if (!await auth(request,tokens?.[device])) return response(401,{error:"unauthorized"});
+        // An expired lease is quarantined, NEVER blindly replayed. Owners can
+        // reconcile interrupted side effects before explicitly resubmitting.
+        await env.DB.prepare(
+          "UPDATE jobs SET state='interrupted' WHERE state='leased' AND lease_until<? AND device=?"
+        ).bind(Date.now(),device).run();
         // A single atomic claim, without issuing arbitrary local commands.
         // Subsequent adapter must independently verify operation/owner grant.
         const row=await env.DB.prepare(
           "UPDATE jobs SET state='leased',lease_until=? WHERE job_id=(SELECT job_id FROM jobs WHERE state='queued' AND device=? ORDER BY created_at LIMIT 1) RETURNING job_id,capability,operation,device,payload_json"
         ).bind(Date.now()+30000,device).first();
         if (!row) return response(200,{state:"empty"});
-        if (!permitted(caps,row.capability,row.operation,row.device))
+        if (!permitted(caps,row.capability,row.operation,row.device)){
+          await env.DB.prepare(
+            "UPDATE jobs SET state='interrupted' WHERE job_id=? AND state='leased'"
+          ).bind(row.job_id).run();
           return response(403,{error:"grant_revoked_after_queue"});
+        }
         return response(200,{state:"leased",job_id:row.job_id,capability:row.capability,
           operation:row.operation,device:row.device,payload:JSON.parse(row.payload_json)});
       }
