@@ -101,14 +101,36 @@ export default {
     const url=new URL(request.url);
     if (url.pathname==="/health" && request.method==="GET")
       return response(200,{service:"universal-gateway",status:"no_public_capabilities"});
-    // Fail closed if owner has not configured an authenticated, signed policy.
+    // Authenticate BEFORE expensive signature verification and D1 access.
+    // Unknown endpoints, malformed devices, and bad tokens must not consume
+    // scarce Workers Free CPU or D1 rows/queries. This grants no capabilities.
+    const submit=url.pathname==="/v1/jobs" && request.method==="POST";
+    const claim=url.pathname==="/v1/device/claim" && request.method==="GET";
+    const complete=url.pathname==="/v1/device/complete" && request.method==="POST";
+    if (!submit && !claim && !complete)
+      return response(404,{error:"unsupported_operation"});
+    if (submit) {
+      if (!await auth(request,env.SUBMIT_TOKEN))
+        return response(401,{error:"unauthorized"});
+    } else {
+      const device=claim?url.searchParams.get("device"):
+        request.headers.get("x-device-id");
+      if (!validId(device))
+        return claim?response(400,{error:"invalid_device"}):
+          response(401,{error:"unauthorized"});
+      let tokens;
+      try {tokens=JSON.parse(env.DEVICE_TOKENS_JSON);}
+      catch {return response(503,{error:"device_tokens_unconfigured"});}
+      if (!await auth(request,tokens?.[device]))
+        return response(401,{error:"unauthorized"});
+    }
+    // Only authenticated callers can trigger signed-policy checks.
+    // Missing/invalid owner policy still fails closed.
     const policy=await ownerPolicy(env);
     if (!policy) return response(503,{error:"owner_activation_not_configured"});
     const {capabilities:caps,revision,hash}=policy;
     try {
       if (url.pathname==="/v1/jobs" && request.method==="POST") {
-        if (!await auth(request,env.SUBMIT_TOKEN))
-          return response(401,{error:"unauthorized"});
         const job=await parseBody(request);
         if (Object.keys(job).sort().join(",")!=="capability,device,job_id,operation,payload" ||
           ![job.job_id,job.capability,job.operation,job.device].every(validId) ||
@@ -134,9 +156,6 @@ export default {
       if (url.pathname==="/v1/device/claim" && request.method==="GET") {
         const device=url.searchParams.get("device");
         if (!validId(device)) return response(400,{error:"invalid_device"});
-        let tokens;
-        try {tokens=JSON.parse(env.DEVICE_TOKENS_JSON);}catch {return response(503,{error:"device_tokens_unconfigured"});}
-        if (!await auth(request,tokens?.[device])) return response(401,{error:"unauthorized"});
         // An expired lease is quarantined, NEVER blindly replayed. Owners can
         // reconcile interrupted side effects before explicitly resubmitting.
         await env.DB.prepare(
@@ -170,10 +189,6 @@ export default {
       }
       if (url.pathname==="/v1/device/complete" && request.method==="POST") {
         const device=request.headers.get("x-device-id");
-        let tokens;
-        try {tokens=JSON.parse(env.DEVICE_TOKENS_JSON);}catch {return response(503,{error:"device_tokens_unconfigured"});}
-        if (!validId(device) || !await auth(request,tokens?.[device]))
-          return response(401,{error:"unauthorized"});
         const data=await parseBody(request);
         if (!validId(data.job_id) || !["succeeded","failed"].includes(data.state) ||
             typeof data.result!=="object" || !data.result ||
