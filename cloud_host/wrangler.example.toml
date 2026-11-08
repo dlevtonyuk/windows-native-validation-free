@@ -1,0 +1,12 @@
+# TEMPLATE ONLY — DO NOT DEPLOY UNMODIFIED.
+# This source repository is PUBLIC. All production bindings/secrets must be
+# configured directly by the owner in a verified Cloudflare Free account.
+name = "universal-gateway-owner-controlled"
+main = "cloud_host/worker.mjs"
+compatibility_date = "2026-11-08"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "universal-gateway-private"
+database_id = "OWNER_MUST_PROVISION_REAL_DATABASE_ID"
