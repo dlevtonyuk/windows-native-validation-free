@@ -93,11 +93,28 @@ try{
   const old=await signedPolicy(1,true);
   live=await launch(old);
   assert.equal(await submit(live,"lab_initial_001"),202,"Initial signed grant failed");
+  const claim=await fetch(live.base+"/v1/device/claim?device=office_pc",{
+    headers:{authorization:"Bearer "+DEVICE}
+  });
+  assert.equal(claim.status,200,"Synthetic device failed to lease job");
+  assert.equal((await claim.json()).job_id,"lab_initial_001");
   await stop(live); live=null;
 
   const revoked=await signedPolicy(2,false);
   live=await launch(revoked);
   assert.equal(await submit(live,"lab_revoked_002"),403,"Revocation not enforced");
+  const complete=()=>fetch(live.base+"/v1/device/complete",{method:"POST",
+    headers:{"content-type":"application/json","authorization":"Bearer "+DEVICE,
+      "x-device-id":"office_pc"},
+    body:JSON.stringify({job_id:"lab_initial_001",state:"succeeded",
+      result:{ram_used_percent:80}})
+  });
+  const revokedCompletion=await complete();
+  assert.equal(revokedCompletion.status,403,
+    "Previously leased job must not complete after owner revocation");
+  assert.equal((await revokedCompletion.json()).error,"grant_revoked_after_lease");
+  assert.equal((await complete()).status,409,
+    "Revoked leased job was not quarantined");
   await stop(live); live=null;
 
   live=await launch(old);
@@ -109,6 +126,7 @@ try{
   assert.equal(await submit(live,"lab_mutated_004"),503,"Same-revision substitution accepted");
   await stop(live); live=null;
   console.log("WORKERD_REAL_D1_SIGNED_REVOCATION_ROLLBACK_PASSED");
+  console.log("WORKERD_REAL_D1_LEASED_COMPLETION_REVOCATION_PASSED");
 }finally{
   await stop(live);
   rmSync(persistence,{recursive:true,force:true});
