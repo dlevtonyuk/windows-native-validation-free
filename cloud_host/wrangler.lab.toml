@@ -1,0 +1,9 @@
+# OFFLINE TEST ONLY. Fake database ID; no Cloudflare account, credentials, or deployment.
+name = "uag-local-engine-only"
+main = "worker.mjs"
+compatibility_date = "2026-11-08"
+workers_dev = false
+[[d1_databases]]
+binding = "DB"
+database_name = "uag-ephemeral-offline-test"
+database_id = "00000000-0000-0000-0000-000000000001"
