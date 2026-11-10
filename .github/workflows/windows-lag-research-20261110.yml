@@ -56,4 +56,16 @@ jobs:
           if($r.actual_cpu_sample_seconds -lt 0.85 -or $r.actual_cpu_sample_seconds -gt 7){throw 'LIGHT_DIAG_CPU_WINDOW_INVALID'}
           if(@($r.groups|Where-Object {$_.private_mb -lt 0 -or $_.working_mb -lt 0 -or $_.process_count -le 0}).Count -ne 0){throw 'LIGHT_DIAG_GROUP_INVALID'}
           Write-Host ('WMI_FREE_NATIVE_RAM_CAPTURE_PASSED: groups='+@($r.groups).Count+', runtime_seconds='+$r.execution_elapsed_seconds)
+      - name: Validate legacy Windows PowerShell 5.1 compatibility
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if($PSVersionTable.PSVersion.Major -ne 5){throw 'EXPECTED_LEGACY_POWERSHELL_51'}
+          $r=& .\tests\ReadOnly-LowOverheadCapture.ps1 -SampleSeconds 1 -MaxGroups 20 | ConvertFrom-Json
+          if($r.schema -ne 1 -or -not $r.no_cim_wmi_queries -or -not $r.read_only){throw 'LEGACY_CONTRACT_INVALID'}
+          if($r.ram_total_gb -lt 1 -or $r.ram_used_pct -lt 0 -or $r.ram_used_pct -gt 100){throw 'LEGACY_MEMORY_INVALID'}
+          if(@($r.groups).Count -lt 2){throw 'LEGACY_GROUPS_MISSING'}
+          if($r.execution_elapsed_seconds -gt 12){throw 'LEGACY_SAMPLER_TOO_SLOW_ON_DISPOSABLE_RUNNER'}
+          Write-Host ('WINDOWS_POWERSHELL_51_WMI_FREE_CAPTURE_PASSED: seconds='+$r.execution_elapsed_seconds)
+
 
