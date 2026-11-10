@@ -73,7 +73,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $providerRows=@(Get-CimInstance -Namespace root\cimv2 -ClassName MSFT_Providers -ErrorAction Stop)
           $hosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='WmiPrvSE.exe'" -ErrorAction Stop)
-          $ids=@{};foreach($host in $hosts){$ids[[string]$host.ProcessId]=$true}
+          $ids=@{};foreach($hostProcess in $hosts){$ids[[string]$hostProcess.ProcessId]=$true}
           $matched=@($providerRows | Where-Object {
             $null -ne $_.HostProcessIdentifier -and $ids.ContainsKey([string]$_.HostProcessIdentifier)
           } | Select-Object -First 1)
