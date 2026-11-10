@@ -67,5 +67,24 @@ jobs:
           if(@($r.groups).Count -lt 2){throw 'LEGACY_GROUPS_MISSING'}
           if($r.execution_elapsed_seconds -gt 12){throw 'LEGACY_SAMPLER_TOO_SLOW_ON_DISPOSABLE_RUNNER'}
           Write-Host ('WINDOWS_POWERSHELL_51_WMI_FREE_CAPTURE_PASSED: seconds='+$r.execution_elapsed_seconds)
+      - name: Validate WMI provider PID mapping under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $providerRows=@(Get-CimInstance -Namespace root\cimv2 -ClassName MSFT_Providers -ErrorAction Stop)
+          $hosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='WmiPrvSE.exe'" -ErrorAction Stop)
+          $ids=@{};foreach($host in $hosts){$ids[[string]$host.ProcessId]=$true}
+          $matched=@($providerRows | Where-Object {
+            $null -ne $_.HostProcessIdentifier -and $ids.ContainsKey([string]$_.HostProcessIdentifier)
+          } | Select-Object -First 1)
+          if($matched.Count -lt 1){throw 'NO_RUNNING_PROVIDER_PID_MAPPING_FOUND'}
+          $targetPid=[int]$matched[0].HostProcessIdentifier
+          $result=& .\tests\ReadOnly-SystemPressureAttribution.ps1 -TargetPids $targetPid -MaxProcesses 20 -SampleSeconds 1 | ConvertFrom-Json
+          if(-not $result.read_only -or $result.schema -ne 1){throw 'WMI_READONLY_LEGACY_CONTRACT_INVALID'}
+          if($result.provider_mapping_status -ne 'AVAILABLE'){throw 'WMI_PROVIDER_LEGACY_MAP_UNAVAILABLE'}
+          $present=@($result.wmi_providers | Where-Object {$_.host_pid -eq $targetPid})
+          if($present.Count -lt 1){throw 'WMI_PROVIDER_TARGET_NOT_MAPPED'}
+          Write-Host ('WINDOWS_POWERSHELL_51_WMI_PROVIDER_MAPPING_PASSED: matched='+$present.Count)
+
 
 
