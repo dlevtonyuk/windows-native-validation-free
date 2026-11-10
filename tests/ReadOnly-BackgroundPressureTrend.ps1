@@ -48,10 +48,11 @@ $rows=@()
 foreach($id in ($b.Keys|Sort-Object)){
   $curr=$b[$id]
   $prev=$a[$id]
-  $same=($null -ne $prev)
-  if($same -and $null -ne $prev.started_utc_ticks -and $null -ne $curr.started_utc_ticks){
-    $same=($prev.started_utc_ticks -eq $curr.started_utc_ticks)
-  }
+  # Never infer process continuity from PID alone: Windows may reuse IDs.
+  # If StartTime is unavailable, all rate/delta fields remain unavailable.
+  $same=($null -ne $prev -and $null -ne $prev.started_utc_ticks -and
+         $null -ne $curr.started_utc_ticks -and
+         $prev.started_utc_ticks -eq $curr.started_utc_ticks)
   $rate=$null;$handleDelta=$null;$threadDelta=$null
   if($same){
     $handleDelta=[int]($curr.handles-$prev.handles)
