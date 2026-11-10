@@ -42,3 +42,15 @@ jobs:
         run: python cloud_host/check_schema.py
       - name: Confirm no Cloudflare deployment credentials are used
         run: echo "OWNER_LOCKED_STAGING_OFFLINE_ONLY_NO_DEPLOYMENT"
+      - name: Verify already owner-deployed staging endpoint from hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint='https://windows-native-validation-free.dlevtonyuk.workers.dev'
+          # Only public, unauthenticated GET requests. No credentials or writes.
+          curl -fsS --max-time 20 --retry 2 --retry-delay 1 "$endpoint/health" | python -c 'import sys,json; d=json.load(sys.stdin); assert d=={"service":"universal-gateway","status":"no_public_capabilities"}, "Unexpected public health contract"'
+          missing=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$endpoint/v1/enable")
+          test "$missing" = 404
+          denied=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$endpoint/v1/device/claim?device=office_pc")
+          test "$denied" = 401
+          echo 'LIVE_OWNER_LOCKED_GATEWAY_HEALTH_PROBE_PASSED'
