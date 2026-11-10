@@ -1,0 +1,13 @@
+# D1 BINDING CANDIDATE — OFFLINE REVIEW ONLY. NOT LIVE DEPLOY CONFIG.
+# DO NOT substitute for wrangler.toml or deploy without owner approval.
+# The production staging branch retains its original owner-locked wrangler.toml.
+# UUID is a resource identifier only, not a credential.
+name = "windows-native-validation-free"
+main = "worker.mjs"
+compatibility_date = "2026-11-08"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uag-staging-queue"
+database_id = "1b393fb4-7699-470d-8a78-5ef1d2af06c7"
