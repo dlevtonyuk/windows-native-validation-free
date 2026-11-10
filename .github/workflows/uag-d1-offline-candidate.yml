@@ -1,0 +1,99 @@
+# Offline D1 candidate only. No Cloudflare API secrets and no remote deploy.
+name: UAG D1 Free Offline Candidate
+on:
+  push:
+    branches:
+      - research/uag-d1-offline-20261110
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uag-d1-offline-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  d1-offline:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate owner-locked candidate and unchanged live configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re, tomllib
+          root=Path('cloud_host')
+          current=tomllib.loads((root/'wrangler.toml').read_text())
+          candidate=tomllib.loads((root/'wrangler.d1.pending.toml').read_text())
+          assert current['name']=='windows-native-validation-free'
+          assert 'd1_databases' not in current
+          assert 'vars' not in current
+          assert all(k not in current for k in ('triggers','routes','services','kv_namespaces','queues'))
+          assert candidate['name']==current['name']
+          assert candidate['main']==current['main']
+          assert 'vars' not in candidate and 'triggers' not in candidate
+          binding=candidate['d1_databases']
+          assert len(binding)==1
+          assert binding[0]=={
+            'binding':'DB',
+            'database_name':'uag-staging-queue',
+            'database_id':'1b393fb4-7699-470d-8a78-5ef1d2af06c7'
+          }
+          assert re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}',binding[0]['database_id'])
+          worker=(root/'worker.mjs').read_text()
+          assert 'status:"no_public_capabilities"' in worker
+          assert 'OWNER_PUBLIC_KEY_B64' in worker and 'OWNER_POLICY_SIGNATURE_B64' in worker
+          assert 'DEVICE_TOKENS_JSON' in worker and 'SUBMIT_TOKEN' in worker
+          print('D1_OWNER_LOCKED_CANDIDATE_STATIC_PASSED')
+          PY
+      - name: Existing signed authorization and schema contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test cloud_host/worker.test.mjs
+          python cloud_host/check_schema.py
+      - name: Install CLI only in disposable test runner
+        shell: bash
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Validate Wrangler D1 binding packaging without deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/owner-locked-d1-dryrun"
+          npx wrangler deploy --dry-run --config cloud_host/wrangler.d1.pending.toml --outdir "${RUNNER_TEMP}/owner-locked-d1-dryrun"
+          echo 'D1_WRANGLER_OFFLINE_PACKAGING_PASSED'
+      - name: Initialize ONLY disposable local D1 copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/d1-local"
+          npx wrangler d1 execute DB --local --config cloud_host/wrangler.d1.pending.toml --persist-to "${RUNNER_TEMP}/d1-local" --file cloud_host/schema.sql --yes
+          npx wrangler d1 execute DB --local --config cloud_host/wrangler.d1.pending.toml --persist-to "${RUNNER_TEMP}/d1-local" --command "SELECT COUNT(*) AS n FROM jobs" --json > "${RUNNER_TEMP}/local-d1-count.json"
+          python -c 'import json,sys; x=json.load(open(sys.argv[1])); assert x and x[0]["results"][0]["n"]==0' "${RUNNER_TEMP}/local-d1-count.json"
+          echo 'D1_LOCAL_EMPTY_QUEUE_SCHEMA_PASSED'
+      - name: Verify local Worker remains fail closed with bound D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --local --ip 127.0.0.1 --port 18868 --config cloud_host/wrangler.d1.pending.toml --persist-to "${RUNNER_TEMP}/d1-local" > "${RUNNER_TEMP}/d1-worker.log" 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 40); do
+            if curl --max-time 2 -fsS http://127.0.0.1:18868/health -o "${RUNNER_TEMP}/health.json"; then ready=1; break; fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then tail -n 35 "${RUNNER_TEMP}/d1-worker.log"; exit 1; fi
+            sleep 0.5
+          done
+          test "$ready" -eq 1
+          python -c 'import json,sys; assert json.load(open(sys.argv[1]))=={"service":"universal-gateway","status":"no_public_capabilities"}' "${RUNNER_TEMP}/health.json"
+          code=$(curl --max-time 4 -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18868/v1/jobs -H 'Content-Type: application/json' -d '{}')
+          test "$code" = 401
+          code=$(curl --max-time 4 -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18868/v1/device/claim?device=office_pc)
+          test "$code" = 503
+          echo 'D1_LOCAL_OWNER_LOCKED_DENIAL_PASSED'
+      - name: No remotely configured resources were changed
+        run: echo 'D1_CANDIDATE_OFFLINE_ONLY_NO_REMOTE_BINDING_NO_REMOTE_SQL_NO_DEPLOYMENT'
