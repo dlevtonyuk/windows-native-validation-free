@@ -1,0 +1,49 @@
+# Isolated regression tests only. No production or staging deployment.
+name: UAG Bounded Inputs Offline Research
+on:
+  push:
+    branches:
+      - research/uag-bounded-inputs-20261110
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uag-bounded-inputs-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  node-and-schema:
+    if: ${{ github.event.repository.private == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: All gateway authorization and byte limit regressions
+        run: node --test cloud_host/worker.test.mjs
+      - name: SQLite schema regression
+        run: python cloud_host/check_schema.py
+  real-workerd-d1:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install real local Cloudflare workerd CLI on disposable runner
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Real local D1 signed grants and revoked lease integration
+        run: node cloud_host/test_workerd_integration.mjs
+      - name: Validate candidate binding without deployment
+        run: npx wrangler deploy --dry-run --config cloud_host/wrangler.d1.pending.toml
