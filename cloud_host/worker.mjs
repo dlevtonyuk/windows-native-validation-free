@@ -12,21 +12,55 @@ const base64Bytes = str => Uint8Array.from(atob(str), c=>c.charCodeAt(0));
 const encoded = str => new TextEncoder().encode(str);
 const validId = s => typeof s === "string" && idPattern.test(s);
 
+// Bound token parsing before any hashing. The configured secret is deliberately
+// not available in the public repository and must be 32-1024 UTF-8 bytes.
 async function tokenMatches(provided, correct) {
-  if (typeof correct !== "string" || correct.length < 32 || typeof provided !== "string")
+  if (typeof correct !== "string" || typeof provided !== "string" ||
+      correct.length<32 || correct.length>1024 || provided.length>1024)
     return false;
-  const [a,b] = await Promise.all([crypto.subtle.digest("SHA-256", encoded(provided)),
-                                    crypto.subtle.digest("SHA-256", encoded(correct))]);
+  const leftBytes=encoded(provided), rightBytes=encoded(correct);
+  if (rightBytes.length<32 || rightBytes.length>1024 || leftBytes.length>1024)
+    return false;
+  const [a,b] = await Promise.all([crypto.subtle.digest("SHA-256",leftBytes),
+                                    crypto.subtle.digest("SHA-256",rightBytes)]);
   const left=new Uint8Array(a), right=new Uint8Array(b);
   let diff=0;
   for (let i=0;i<left.length;i++) diff|=left[i]^right[i];
   return diff===0;
 }
+// Bounded byte-by-byte accounting on the request stream. Do NOT call
+// request.text() before enforcing the limit: that buffers untrusted payloads.
+// Cloudflare and Node Request streams expose the standard ReadableStream reader.
 async function parseBody(request) {
-  const len=Number(request.headers.get("content-length") || 0);
-  if (len > maxBody) throw new Error("body_too_large");
-  const raw=await request.text();
-  if (raw.length>maxBody) throw new Error("body_too_large");
+  const header=request.headers.get("content-length");
+  if (header !== null &&
+      (!/^(0|[1-9][0-9]*)$/.test(header) || Number(header)>maxBody))
+    throw new Error("body_too_large");
+  if (!request.body) throw new Error("invalid_json_object");
+  const reader=request.body.getReader();
+  const chunks=[];
+  let size=0;
+  try {
+    for (;;) {
+      const {done,value}=await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error("invalid_json_object");
+      size+=value.byteLength;
+      if (size>maxBody) throw new Error("body_too_large");
+      chunks.push(value);
+    }
+  } catch (e) {
+    try { await reader.cancel(); } catch {}
+    throw e;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes=new Uint8Array(size);
+  let offset=0;
+  for (const chunk of chunks) { bytes.set(chunk,offset); offset+=chunk.length; }
+  let raw;
+  try { raw=new TextDecoder("utf-8",{fatal:true}).decode(bytes); }
+  catch { throw new Error("invalid_json_object"); }
   const result=JSON.parse(raw);
   if (!result || typeof result!=="object" || Array.isArray(result))
     throw new Error("invalid_json_object");
@@ -92,7 +126,7 @@ function permitted(caps,cap,op,device) {
 }
 async function auth(request, token) {
   const header=request.headers.get("authorization") || "";
-  if (!header.startsWith("Bearer ")) return false;
+  if (!header.startsWith("Bearer ") || header.length>1031) return false;
   return tokenMatches(header.slice(7),token);
 }
 
@@ -135,7 +169,7 @@ export default {
         if (Object.keys(job).sort().join(",")!=="capability,device,job_id,operation,payload" ||
           ![job.job_id,job.capability,job.operation,job.device].every(validId) ||
           !job.payload || typeof job.payload!=="object" ||
-          Array.isArray(job.payload) || JSON.stringify(job.payload).length>1024)
+          Array.isArray(job.payload) || encoded(JSON.stringify(job.payload)).byteLength>1024)
           return response(400,{error:"invalid_job"});
         if (!permitted(caps,job.capability,job.operation,job.device))
           return response(403,{error:"capability_disabled_or_out_of_scope"});
@@ -192,7 +226,7 @@ export default {
         const data=await parseBody(request);
         if (!validId(data.job_id) || !["succeeded","failed"].includes(data.state) ||
             typeof data.result!=="object" || !data.result ||
-            JSON.stringify(data.result).length>1024)
+            encoded(JSON.stringify(data.result)).byteLength>1024)
           return response(400,{error:"invalid_completion"});
         // Completion is NOT authorization for an already leased operation:
         // recheck the current owner grant and match the policy revision in
