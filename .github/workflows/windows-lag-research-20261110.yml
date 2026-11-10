@@ -1,0 +1,47 @@
+# Windows-lag research only. No installation, changes to user PC or private uploads.
+name: Windows Lag Read-only Process Attribution
+on:
+  push:
+    branches:
+      - research/windows-lag-readonly-20261110
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-lag-research-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  read-only-windows:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Confirm disposable Windows runner
+        shell: pwsh
+        run: |
+          if($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+            throw 'NOT_DISPOSABLE_HOSTED_WINDOWS'
+          }
+      - name: Validate short-interval CPU, handle, thread and provider attribution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=& ./tests/ReadOnly-SystemPressureAttribution.ps1 -TargetPids $PID -MaxProcesses 25 -SampleSeconds 1 | ConvertFrom-Json
+          if(-not $r.read_only -or $r.schema -ne 1 -or $r.elapsed_seconds -lt 0.75) { throw 'READONLY_SCHEMA_INVALID' }
+          if(@($r.process_data).Count -lt 1){throw 'PROCESS_RESULTS_MISSING'}
+          $rows=@($r.process_data | Where-Object { $_.pid -eq $PID })
+          if($rows.Count -ne 1){throw 'OWN_PROCESS_NOT_FOUND'}
+          $self=$rows[0]
+          if($self.handles -lt 1 -or $self.threads -lt 1 -or $self.private_mb -lt 1){throw 'PROCESS_COUNTERS_INVALID'}
+          if($null -ne $self.cpu_percent_total_capacity -and
+             ($self.cpu_percent_total_capacity -lt 0 -or $self.cpu_percent_total_capacity -gt 100)){
+            throw 'CPU_TOTAL_CAPACITY_CALIBRATION_INVALID'
+          }
+          if(@('AVAILABLE','UNAVAILABLE_OR_TIMEOUT','NOT_REQUESTED') -notcontains $r.provider_mapping_status){
+            throw 'WMI_PROVIDER_MAP_STATUS_INVALID'
+          }
+          # Never print provider identity or private process data to a public log.
+          Write-Host ('READONLY_ATTRIBUTION_FIXTURE_PASSED: n='+@($r.process_data).Count+', wmi='+$r.provider_mapping_status)
