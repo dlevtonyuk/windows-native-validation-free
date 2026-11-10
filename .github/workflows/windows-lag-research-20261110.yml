@@ -88,3 +88,25 @@ jobs:
 
 
 
+
+      - name: Validate WMI-free PID-level background pressure trends (PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=& .\tests\ReadOnly-BackgroundPressureTrend.ps1 -ProcessNames powershell -SampleSeconds 1 -MaxProcesses 10 | ConvertFrom-Json
+          if($r.schema -ne 1 -or -not $r.read_only -or -not $r.no_wmi){throw 'BG_TREND_CONTRACT_INVALID'}
+          if($r.matched_pid_count -lt 1){throw 'BG_TREND_PROCESS_MISSING'}
+          $self=@($r.processes | Where-Object { $_.pid -eq $PID })
+          if($self.Count -ne 1){throw 'BG_TREND_SELF_MISSING'}
+          if($self[0].threads -lt 1 -or $self[0].handles -lt 1 -or -not $self[0].stable_pid_and_start_time) {throw 'BG_TREND_PID_VALIDATION_INVALID'}
+          if($null -ne $self[0].cpu_percent_total_capacity -and ($self[0].cpu_percent_total_capacity -lt 0 -or $self[0].cpu_percent_total_capacity -gt 100)){throw 'BG_TREND_CPU_INVALID'}
+          Write-Host ('WINDOWS_51_BG_PRESSURE_TREND_PASSED: processes='+$r.matched_pid_count)
+      - name: Validate WMI-free PID-level trend in modern PowerShell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=& ./tests/ReadOnly-BackgroundPressureTrend.ps1 -ProcessNames pwsh -SampleSeconds 1 -MaxProcesses 10 | ConvertFrom-Json
+          if($r.schema -ne 1 -or -not $r.read_only -or -not $r.no_wmi){throw 'MODERN_BG_TREND_CONTRACT_INVALID'}
+          $self=@($r.processes | Where-Object { $_.pid -eq $PID })
+          if($self.Count -ne 1){throw 'MODERN_BG_TREND_SELF_MISSING'}
+          Write-Host ('POWERSHELL_7_BG_PRESSURE_TREND_PASSED: processes='+$r.matched_pid_count)
