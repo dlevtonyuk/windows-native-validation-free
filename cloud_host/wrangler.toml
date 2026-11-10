@@ -2,7 +2,7 @@
 # Deploy ONLY after the account owner explicitly presses Save and Deploy.
 # No secrets, no D1 binding, no cron, no routes, no custom domain, no billable services.
 # /health may return an inert status. All job endpoints deny requests.
-name = "uag-owner-locked-staging"
+name = "windows-native-validation-free"
 main = "worker.mjs"
 compatibility_date = "2026-11-08"
 workers_dev = true
