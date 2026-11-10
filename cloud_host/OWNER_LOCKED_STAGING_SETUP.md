@@ -11,7 +11,7 @@ The owner has already created a Cloudflare Free account. The GitHub account and 
 1. Cloudflare Dashboard > **Workers & Pages** > **Create application** > **GitHub** (exact labels may evolve).
 2. If requested, authorize Cloudflare's GitHub App for **only** `dlevtonyuk/windows-native-validation-free`, not all repositories.
 3. Select repository `dlevtonyuk/windows-native-validation-free`; choose branch **`research/uag-cloudflare-free-staging-20261110`**, **NOT main**. Ensure that this is the branch Cloudflare will build/deploy.
-4. Set root directory to **`cloud_host`**, Worker name **`uag-owner-locked-staging`**, matching `wrangler.toml`.
+4. For the EXISTING Cloudflare Worker `windows-native-validation-free`, go to Settings > Build > Branch control and set production branch to `research/uag-cloudflare-free-staging-20261110` (NOT `main`); disable preview builds if present. In Settings > Build > configuration, set root directory to **`cloud_host`**. The Worker name in the staging `wrangler.toml` now matches the existing Cloudflare Worker `windows-native-validation-free`; do not create or rename a Worker.
 5. Build command: `npm install --no-save --ignore-scripts wrangler@4.158.0`.
 6. Deploy command: `npx wrangler deploy --config wrangler.toml`. Turn off other branch previews/automatic extra builds if offered. Do **not** create any environment variables, secrets, D1 bindings, cron schedules, domains or paid resources.
 7. Review settings and **only then** decide whether to click Save and Deploy. This is an owner-controlled activation of an **inert staging endpoint**, not an authorization to perform computer or business operations.
