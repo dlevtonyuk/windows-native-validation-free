@@ -35,3 +35,7 @@ Cloudflare Workers Builds auto-deploys commits pushed to the configured producti
 5. Device endpoint requires a separately validated lightweight agent; **a gateway does not remove browser rendering from the local PC**.
 
 The design goal is perpetual $0 at current terms, not a guarantee that providers cannot change Free limits.
+
+## Fresh-build provenance check (November 10, 2026)
+
+The owner's Cloudflare settings screenshot verifies production branch `research/uag-cloudflare-free-staging-20261110`, root directory `/cloud_host`, and deploy command `npx wrangler deploy --config wrangler.toml`. A failed build attempted to read `/opt/buildhome/repo/cloud_host/wrangler.toml`, which exists on this staging branch but is absent from the repository's `main` branch. Retrying an earlier build may reuse its original source revision, even after branch settings change. This documentation-only commit intentionally generates a NEW push event on the correct staging branch so the connected Cloudflare integration can build the current staging source. This commit makes no Worker code or permission changes. Observe the new build's source branch/commit and health response before any additional changes. If no build is triggered, do not change main or grant additional capabilities: investigate GitHub webhook/integration delivery and Cloudflare build trigger status.
