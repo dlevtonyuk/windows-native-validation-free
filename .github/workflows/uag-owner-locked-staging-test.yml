@@ -51,6 +51,9 @@ jobs:
           curl -fsS --max-time 20 --retry 2 --retry-delay 1 "$endpoint/health" | python -c 'import sys,json; d=json.load(sys.stdin); assert d=={"service":"universal-gateway","status":"no_public_capabilities"}, "Unexpected public health contract"'
           missing=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$endpoint/v1/enable")
           test "$missing" = 404
-          denied=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$endpoint/v1/device/claim?device=office_pc")
-          test "$denied" = 401
+          # Without configured device tokens, the public Worker deliberately
+          # returns 503, before signature/DB checks; this is fail-closed.
+          denied=$(curl -sS --max-time 15 -o /tmp/uag-claim-denied.json -w '%{http_code}' "$endpoint/v1/device/claim?device=office_pc")
+          test "$denied" = 503
+          python -c 'import json; d=json.load(open("/tmp/uag-claim-denied.json")); assert d=={"error":"device_tokens_unconfigured"}, "Unexpected device-denial response"'
           echo 'LIVE_OWNER_LOCKED_GATEWAY_HEALTH_PROBE_PASSED'
