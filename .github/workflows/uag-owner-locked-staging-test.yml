@@ -1,0 +1,44 @@
+# No Cloudflare account access, no credentials, no deployment, no business data.
+name: UAG Owner-Locked Staging Gate
+on:
+  push:
+    branches:
+      - research/uag-cloudflare-free-staging-20261110
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uag-owner-locked-staging-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  owner-locked-staging:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify inert Cloudflare staging configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import tomllib
+          c=tomllib.loads(Path("cloud_host/wrangler.toml").read_text())
+          assert c.get("name")=="uag-owner-locked-staging"
+          assert c.get("main")=="worker.mjs"
+          assert c.get("workers_dev") is True
+          assert not any(k in c for k in ("d1_databases","vars","routes","route","triggers","durable_objects","kv_namespaces","services","queues","r2_buckets"))
+          w=Path("cloud_host/worker.mjs").read_text()
+          assert 'status:"no_public_capabilities"' in w
+          assert 'OWNER_PUBLIC_KEY_B64' in w and 'OWNER_POLICY_SIGNATURE_B64' in w
+          print("OWNER_LOCKED_STAGING_STATIC_GUARD_PASSED")
+          PY
+      - name: Validate signed owner policy and denied operations with synthetic identities
+        run: node --test cloud_host/worker.test.mjs
+      - name: Validate D1 policy schema locally
+        run: python cloud_host/check_schema.py
+      - name: Confirm no Cloudflare deployment credentials are used
+        run: echo "OWNER_LOCKED_STAGING_OFFLINE_ONLY_NO_DEPLOYMENT"
