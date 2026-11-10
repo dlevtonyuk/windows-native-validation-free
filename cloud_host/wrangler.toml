@@ -1,8 +1,16 @@
 # OWNER-LOCKED CLOUDFLARE FREE STAGING ONLY (NO PRODUCTION CAPABILITIES).
 # Deploy ONLY after the account owner explicitly presses Save and Deploy.
-# No secrets, no D1 binding, no cron, no routes, no custom domain, no billable services.
+# Owner-approved inert D1 binding only. No secrets, cron, routes, domain, or paid services.
+# The remote D1 schema is separately initialized by the owner; no jobs can run.
 # /health may return an inert status. All job endpoints deny requests.
 name = "windows-native-validation-free"
 main = "worker.mjs"
 compatibility_date = "2026-11-08"
 workers_dev = true
+
+# Owner-approved 2026-11-10: connect the existing empty Free D1 database.
+# No owner-signed policy, device credentials or real business operations are enabled.
+[[d1_databases]]
+binding = "DB"
+database_name = "uag-staging-queue"
+database_id = "1b393fb4-7699-470d-8a78-5ef1d2af06c7"

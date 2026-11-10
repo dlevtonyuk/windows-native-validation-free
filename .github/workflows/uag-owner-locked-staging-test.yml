@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify inert Cloudflare staging configuration
+      - name: Verify owner-approved D1-bound inert staging configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -30,11 +30,16 @@ jobs:
           assert c.get("name")=="windows-native-validation-free"
           assert c.get("main")=="worker.mjs"
           assert c.get("workers_dev") is True
-          assert not any(k in c for k in ("d1_databases","vars","routes","route","triggers","durable_objects","kv_namespaces","services","queues","r2_buckets"))
+          assert c.get("d1_databases") == [{
+            "binding": "DB",
+            "database_name": "uag-staging-queue",
+            "database_id": "1b393fb4-7699-470d-8a78-5ef1d2af06c7"
+          }]
+          assert not any(k in c for k in ("vars","routes","route","triggers","durable_objects","kv_namespaces","services","queues","r2_buckets"))
           w=Path("cloud_host/worker.mjs").read_text()
           assert 'status:"no_public_capabilities"' in w
           assert 'OWNER_PUBLIC_KEY_B64' in w and 'OWNER_POLICY_SIGNATURE_B64' in w
-          print("OWNER_LOCKED_STAGING_STATIC_GUARD_PASSED")
+          print("OWNER_LOCKED_STAGING_D1_BINDING_GUARD_PASSED")
           PY
       - name: Validate signed owner policy and denied operations with synthetic identities
         run: node --test cloud_host/worker.test.mjs
