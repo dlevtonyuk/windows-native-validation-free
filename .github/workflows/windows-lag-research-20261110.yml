@@ -45,3 +45,15 @@ jobs:
           }
           # Never print provider identity or private process data to a public log.
           Write-Host ('READONLY_ATTRIBUTION_FIXTURE_PASSED: n='+@($r.process_data).Count+', wmi='+$r.provider_mapping_status)
+      - name: Validate WMI-free native RAM and bounded process CPU diagnostic
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=& ./tests/ReadOnly-LowOverheadCapture.ps1 -SampleSeconds 1 -MaxGroups 20 | ConvertFrom-Json
+          if($r.schema -ne 1 -or !$r.read_only -or !$r.no_cim_wmi_queries){throw 'LIGHT_DIAG_CONTRACT_INVALID'}
+          if($r.ram_total_gb -lt 1 -or $r.ram_used_pct -lt 0 -or $r.ram_used_pct -gt 100){throw 'LIGHT_DIAG_MEMORY_INVALID'}
+          if($r.enumerated_processes -lt 1 -or @($r.groups).Count -lt 2){throw 'LIGHT_DIAG_PROCESS_INVALID'}
+          if($r.actual_cpu_sample_seconds -lt 0.85 -or $r.actual_cpu_sample_seconds -gt 7){throw 'LIGHT_DIAG_CPU_WINDOW_INVALID'}
+          if(@($r.groups|Where-Object {$_.private_mb -lt 0 -or $_.working_mb -lt 0 -or $_.process_count -le 0}).Count -ne 0){throw 'LIGHT_DIAG_GROUP_INVALID'}
+          Write-Host ('WMI_FREE_NATIVE_RAM_CAPTURE_PASSED: groups='+@($r.groups).Count+', runtime_seconds='+$r.execution_elapsed_seconds)
+
