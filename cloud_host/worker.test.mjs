@@ -384,3 +384,114 @@ test("valid identity without owner policy still fails closed",async()=>{
   assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("missing_01"),TOKEN),env)).status,503);
   assert.equal((await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env)).status,503);
 });
+
+test("oversize streamed HTTP bodies are rejected without allocating entire payload",async()=>{
+  const env=await policyEnv();
+  let pulls=0;
+  const source=new ReadableStream({
+    pull(controller) {
+      pulls++;
+      controller.enqueue(new Uint8Array(4097));
+      controller.close();
+    }
+  });
+  const reqStream=new Request(url("/v1/jobs"),{
+    method:"POST",
+    headers:{authorization:"Bearer "+TOKEN,"content-type":"application/json"},
+    body:source,duplex:"half"
+  });
+  const r=await gateway.fetch(reqStream,env);
+  assert.equal(r.status,400);
+  assert.equal(env.DB.jobs.size,0);
+  assert.ok(pulls<=2);
+});
+
+test("oversize content-length is rejected even before reading body stream",async()=>{
+  const env=await policyEnv();
+  let reads=0;
+  const source=new ReadableStream({pull(controller){
+    reads++;
+    controller.enqueue(new TextEncoder().encode("{}"));
+    controller.close();
+  }});
+  const request=new Request(url("/v1/jobs"),{
+    method:"POST",
+    headers:{authorization:"Bearer "+TOKEN,"content-length":"5000"},
+    body:source,duplex:"half"
+  });
+  const res=await gateway.fetch(request,env);
+  assert.equal(res.status,400);
+  assert.equal(env.DB.jobs.size,0);
+  assert.ok(reads<=1);
+});
+
+test("malformed length and invalid UTF-8 are rejected as bad requests",async()=>{
+  const env=await policyEnv();
+  const badHeader=new Request(url("/v1/jobs"),{
+    method:"POST",
+    headers:{authorization:"Bearer "+TOKEN,"content-length":"invalid"},
+    body:"{}"
+  });
+  assert.equal((await gateway.fetch(badHeader,env)).status,400);
+  const invalidBytes=new Uint8Array([0xc3,0x28]);
+  const badUtf8=new Request(url("/v1/jobs"),{
+    method:"POST",headers:{authorization:"Bearer "+TOKEN},
+    body:invalidBytes
+  });
+  assert.equal((await gateway.fetch(badUtf8,env)).status,400);
+  assert.equal(env.DB.jobs.size,0);
+});
+
+test("payload byte limit rejects Unicode even when code-unit count fits",async()=>{
+  const env=await policyEnv();
+  const j=job("unicode_payload_001");
+  j.payload={memo:"😀".repeat(320)};
+  assert.ok(JSON.stringify(j.payload).length<1024);
+  assert.ok(Buffer.byteLength(JSON.stringify(j.payload))>1024);
+  const r=await gateway.fetch(req("/v1/jobs","POST",j,TOKEN),env);
+  assert.equal(r.status,400);
+  assert.equal(env.DB.jobs.size,0);
+});
+
+test("completion result byte limit rejects Unicode before writing to D1",async()=>{
+  const env=await policyEnv();
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("unicode_result_001"),TOKEN),env)).status,202);
+  assert.equal((await gateway.fetch(req("/v1/device/claim?device=office_pc","GET",null,DEVICE),env)).status,200);
+  const done={job_id:"unicode_result_001",state:"succeeded",result:{note:"😀".repeat(320)}};
+  assert.ok(JSON.stringify(done.result).length<1024);
+  const reply=await gateway.fetch(req("/v1/device/complete","POST",done,DEVICE,"office_pc"),env);
+  assert.equal(reply.status,400);
+  assert.equal(env.DB.jobs.get("unicode_result_001").state,"leased");
+});
+
+test("oversized bearer token rejected without consulting signed policy or D1",async()=>{
+  const env=await policyEnv();
+  Object.defineProperty(env,"OWNER_POLICY_JSON",{
+    get(){throw Error("Owner policy must not be touched for invalid token")}
+  });
+  env.DB.prepare=()=>{throw Error("D1 must not be touched for invalid token")};
+  const invalid="x".repeat(1200);
+  assert.equal((await gateway.fetch(req("/v1/jobs","POST",job("token_too_long_1"),invalid),env)).status,401);
+});
+
+test("chunked 4 KB maximum rejects extra bytes, accepts a normal JSON job",async()=>{
+  const env=await policyEnv();
+  const j=job("chunked_valid_001");
+  const encodedJob=new TextEncoder().encode(JSON.stringify(j));
+  let index=0;
+  const source=new ReadableStream({
+    pull(controller){
+      if(index>=encodedJob.length){controller.close();return;}
+      const next=Math.min(index+7,encodedJob.length);
+      controller.enqueue(encodedJob.subarray(index,next));
+      index=next;
+    }
+  });
+  const r=await gateway.fetch(new Request(url("/v1/jobs"),{
+    method:"POST",
+    headers:{authorization:"Bearer "+TOKEN,"content-type":"application/json"},
+    body:source,duplex:"half"
+  }),env);
+  assert.equal(r.status,202);
+  assert.equal(env.DB.jobs.get("chunked_valid_001").state,"queued");
+});
