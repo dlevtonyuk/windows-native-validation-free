@@ -1,0 +1,80 @@
+# Owner-approved staging candidate, isolated proof; no remote SQL or live deployments.
+name: UAG Owner Stage Candidate Gate
+on:
+  push:
+    branches:
+      - research/uag-staging-owner-stage-candidate-20261111
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    if: ${{ github.event.repository.private == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Worker legacy policy and disabled-owner staging security tests
+        run: node --test cloud_host/worker.test.mjs cloud_host/owner_stage.test.mjs
+      - name: Existing live D1 schema contract
+        run: python cloud_host/check_schema.py
+      - name: Owner policy staging revision atomicity
+        run: python cloud_host/check_owner_stage_sqlite.py
+  cloudflare-runtime:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin local Wrangler only in disposable runner
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Prepare exactly the existing live Worker config; no secrets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tomllib
+          c=tomllib.loads(Path('cloud_host/wrangler.toml').read_text())
+          assert c['name']=='windows-native-validation-free'
+          assert c['main']=='worker.mjs'
+          assert c['workers_dev'] is True
+          assert c['d1_databases']==[{'binding':'DB','database_name':'uag-staging-queue','database_id':'1b393fb4-7699-470d-8a78-5ef1d2af06c7'}]
+          assert not any(k in c for k in ('vars','triggers','routes','services','queues','r2_buckets'))
+          assert "import { handleOwnerStage }" in Path('cloud_host/worker.mjs').read_text()
+          print('OWNER_STAGE_INERT_BINDING_CONFIG_VERIFIED')
+          PY
+      - name: Dry-run package for Cloudflare without deployment
+        run: npx wrangler deploy --config cloud_host/wrangler.toml --dry-run
+      - name: Live-config local workerd deny-by-default smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --config cloud_host/wrangler.toml --local --ip 127.0.0.1 --port 18931 > /tmp/uag-stage-local.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sS --max-time 2 -o /tmp/uag-stage-health.json -f http://127.0.0.1:18931/health; then ready=1; break; fi
+            sleep 0.4
+          done
+          if [ "$ready" != 1 ]; then tail -n 70 /tmp/uag-stage-local.log; exit 1; fi
+          python -c 'import json; assert json.load(open("/tmp/uag-stage-health.json"))=={"service":"universal-gateway","status":"no_public_capabilities"}'
+          status=$(curl -sS -o /tmp/uag-stage-owner.json -w '%{http_code}' -X POST http://127.0.0.1:18931/owner/policy/stage -H 'Content-Type: application/json' -d '{}')
+          test "$status" = 403
+          python -c 'import json; assert json.load(open("/tmp/uag-stage-owner.json"))=={"error":"owner_access_required"}'
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18931/v1/jobs -H 'Content-Type: application/json' -d '{}')
+          test "$status" = 401
+          echo 'LIVE_CONFIG_OWNER_STAGE_FAIL_CLOSED_WORKERD_PASSED'

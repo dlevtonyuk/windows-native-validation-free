@@ -1,3 +1,4 @@
+import { handleOwnerStage } from "./owner_stage.mjs";
 // Cloudflare Workers Free + D1 control-plane prototype. Generic/NO SECRETS.
 // No endpoints exist until OWNER_PUBLIC_KEY_B64, OWNER_POLICY_JSON,
 // OWNER_POLICY_SIGNATURE_B64, SUBMIT_TOKEN, DEVICE_TOKENS_JSON and DB are
@@ -97,7 +98,9 @@ async function auth(request, token) {
 }
 
 export default {
-  async fetch(request,env) {
+  async fetch(request,env,ctx) {
+    const ownerStage=await handleOwnerStage(request,env,ctx);
+    if (ownerStage) return ownerStage;
     const url=new URL(request.url);
     if (url.pathname==="/health" && request.method==="GET")
       return response(200,{service:"universal-gateway",status:"no_public_capabilities"});
