@@ -6,12 +6,14 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { runSyntheticOnce } from "./synthetic_agent.mjs";
 
 const wrangler=resolve("node_modules/.bin/wrangler");
 const config="cloud_host/wrangler.lab.toml";
 const persistence=mkdtempSync(join(tmpdir(),"uag-workerd-lab-"));
 const SUBMIT="synthetic-submit-token-only-xxxxxxxxxxxxxx-12345";
 const DEVICE="synthetic-device-token-only-xxxxxxxxxxxxxx-12345";
+const CLOUD_DEVICE="synthetic-cloud-runner-token-xxxxxxxxxxxx-123456";
 const keyPair=await webcrypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
 const pub=Buffer.from(await webcrypto.subtle.exportKey("raw",keyPair.publicKey)).toString("base64");
 const b64=x=>Buffer.from(x).toString("base64");
@@ -35,10 +37,10 @@ async function command(args) {
   assert.equal(code,0,"local D1 init failed: "+output.slice(-600));
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function signedPolicy(revision, enabled){
+async function signedPolicy(revision, enabled, extras={}){
   const policy=JSON.stringify({version:1,owner:"local_owner",revision,
     expires_utc:"2099-01-01T00:00:00Z",
-    capabilities:{windows_diagnostics:{enabled,operations:["snapshot"],devices:["office_pc"]}}});
+    capabilities:{windows_diagnostics:{enabled,operations:["snapshot"],devices:["office_pc"]},...extras}});
   const sig=await webcrypto.subtle.sign("Ed25519",keyPair.privateKey,new TextEncoder().encode(policy));
   return {policy,sig:b64(sig)};
 }
@@ -49,7 +51,7 @@ async function launch(p){
     "--var","OWNER_POLICY_JSON:"+p.policy,
     "--var","OWNER_POLICY_SIGNATURE_B64:"+p.sig,
     "--var","SUBMIT_TOKEN:"+SUBMIT,
-    "--var","DEVICE_TOKENS_JSON:"+JSON.stringify({office_pc:DEVICE})
+    "--var","DEVICE_TOKENS_JSON:"+JSON.stringify({office_pc:DEVICE,cloud_runner:CLOUD_DEVICE})
   ];
   const child=spawn(wrangler,["dev","--local","--ip","127.0.0.1",
     "--port",String(port),"--config",config,"--persist-to",persistence,...flags],
@@ -136,6 +138,29 @@ try{
   live=await launch(mutated);
   assert.equal(await submit(live,"lab_mutated_004"),503,"Same-revision substitution accepted");
   await stop(live); live=null;
+  // A separately hosted test actor claims, performs only a synthetic in-memory
+  // probe, and acknowledges the result through the real local D1-bound Worker.
+  // This uses generated test credentials and NEVER contacts owner infrastructure.
+  const cloudPolicy=await signedPolicy(3,false,{
+    synthetic_probe:{enabled:true,operations:["echo"],devices:["cloud_runner"]}
+  });
+  live=await launch(cloudPolicy);
+  const submitted=await fetch(live.base+"/v1/jobs",{
+    method:"POST",
+    headers:{"content-type":"application/json","authorization":"Bearer "+SUBMIT},
+    body:JSON.stringify({job_id:"lab_cloud_001",capability:"synthetic_probe",
+      operation:"echo",device:"cloud_runner",payload:{nonce:"offline_cloud_001"}})
+  });
+  assert.equal(submitted.status,202,"Synthetic cloud job was not queued");
+  const ran=await runSyntheticOnce({endpoint:live.base,token:CLOUD_DEVICE});
+  assert.deepEqual(ran,{state:"succeeded",job_id:"lab_cloud_001"});
+  const empty=await runSyntheticOnce({endpoint:live.base,token:CLOUD_DEVICE});
+  assert.deepEqual(empty,{state:"empty"},"Completed job must not be re-leased");
+  const badToken=await runSyntheticOnce({endpoint:live.base,token:"incorrect_credential_for_cloud_fixture_000"});
+  assert.equal(badToken.state,"unavailable");
+  assert.equal(badToken.http_status,401);
+  await stop(live);live=null;
+  console.log("WORKERD_SYNTHETIC_CLOUD_EXECUTION_COMPLETED_WITH_D1_PASSED");
   console.log("WORKERD_REAL_D1_SIGNED_REVOCATION_ROLLBACK_PASSED");
   console.log("WORKERD_REAL_D1_LEASED_COMPLETION_REVOCATION_PASSED");
   console.log("WORKERD_UNAUTHORIZED_PREFLIGHT_DENIED_PASSED");
