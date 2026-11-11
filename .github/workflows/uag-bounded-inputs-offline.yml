@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: '22'
       - name: All gateway authorization and byte limit regressions
-        run: node --test cloud_host/worker.test.mjs cloud_host/synthetic_agent.test.mjs
+        run: node --test cloud_host/worker.test.mjs cloud_host/synthetic_agent.test.mjs cloud_host/owner_policy_vault.test.mjs
       - name: SQLite schema regression
         run: python cloud_host/check_schema.py
   real-workerd-d1:
