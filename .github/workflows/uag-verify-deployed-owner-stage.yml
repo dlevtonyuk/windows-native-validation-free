@@ -17,13 +17,19 @@ jobs:
         run: |
           set -euo pipefail
           base='https://windows-native-validation-free.dlevtonyuk.workers.dev'
-          curl -fsS --retry 2 --retry-delay 1 --max-time 18 "$base/health" | python -c 'import json,sys; assert json.load(sys.stdin)=={"service":"universal-gateway","status":"no_public_capabilities"}'
+          health_status=$(curl --retry 2 --retry-delay 1 --max-time 18 -sS -o /tmp/uag-live-health.json -w '%{http_code}' "$base/health")
+          echo "Health HTTP $health_status"
+          test "$health_status" = 200
+          python -c 'import json; assert json.load(open("/tmp/uag-live-health.json"))=={"service":"universal-gateway","status":"no_public_capabilities"}'
           # A POST with no Access identity must be rejected before any SQL or signature validation.
           status=$(curl -sS --retry 2 --retry-delay 1 --max-time 18 -o /tmp/owner-stage-denial.json -w '%{http_code}' -X POST "$base/owner/policy/stage" -H 'Content-Type: application/json' -d '{}')
+          echo "Owner staging unauthenticated HTTP $status"
           test "$status" = 403
           python -c 'import json; assert json.load(open("/tmp/owner-stage-denial.json"))=={"error":"owner_access_required"}'
           status=$(curl -sS --retry 2 --retry-delay 1 --max-time 18 -o /dev/null -w '%{http_code}' -X POST "$base/v1/jobs" -H 'Content-Type: application/json' -d '{}')
+          echo "Job unauthenticated HTTP $status"
           test "$status" = 401
           status=$(curl -sS --retry 2 --retry-delay 1 --max-time 18 -o /dev/null -w '%{http_code}' "$base/v1/device/claim?device=office_pc")
+          echo "Device unauthenticated HTTP $status"
           test "$status" = 503
           echo 'LIVE_OWNER_STAGE_EXTERNAL_DENY_BY_DEFAULT_VERIFIED'
