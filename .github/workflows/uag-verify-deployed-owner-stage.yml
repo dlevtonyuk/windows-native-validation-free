@@ -31,18 +31,19 @@ jobs:
           test "$status" = 401
           # Avoid curl's intermittent HTTP 503 response write error (exit 23).
           python - <<'PY'
-          from urllib.request import urlopen
+          from urllib.request import urlopen, Request
           from urllib.error import HTTPError
           endpoint='https://windows-native-validation-free.dlevtonyuk.workers.dev/v1/device/claim?device=office_pc'
           try:
-              response=urlopen(endpoint,timeout=18)
+              request=Request(endpoint,headers={'User-Agent':'uag-ci-verification/1.0 (+https://github.com/dlevtonyuk/windows-native-validation-free)'})
+              response=urlopen(request,timeout=18)
               raise AssertionError('Unexpected device claim response '+str(response.status))
           except HTTPError as e:
               print('Device unauthenticated HTTP',e.code)
               print('Device response Content-Type',e.headers.get('Content-Type','unknown'))
               print('Device response fingerprint',e.read(512).decode('utf-8','replace')[:160])
-              # A 403 from Cloudflare edge also denies unauthorized access;
-              # distinguish it from the Worker-specific 503 in the findings.
-              assert e.code in (403,503)
+              # A descriptive client signature avoids workers.dev error 1010.
+              # This verifies Worker-level denial, not a BIC rejection.
+              assert e.code==503
           PY
           echo 'LIVE_OWNER_STAGE_EXTERNAL_DENY_BY_DEFAULT_VERIFIED'
