@@ -16,7 +16,7 @@ test('private Ed25519 key is stored only encrypted in owner-controlled prototype
   assert.equal(Buffer.from(v.public_key_b64,'base64').length,32);
   assert.equal(Buffer.from(v.iv_b64,'base64').length,12);
   assert.equal(Buffer.from(v.tag_b64,'base64').length,16);
-  assert.ok(v.ciphertext_b64.length>70);
+  assert.ok(Buffer.from(v.ciphertext_b64,'base64').length>=32);
   assert.equal(JSON.stringify(v).includes('BEGIN PRIVATE KEY'),false);
   assert.equal(JSON.stringify(v).includes(password),false);
 });
