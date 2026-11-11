@@ -49,7 +49,8 @@ export async function runSyntheticOnce({endpoint,token,fetchImpl=fetch}) {
   if(data.state!=='leased'||data.capability!==CAP||data.operation!==OP||data.device!==DEVICE||
      typeof data.job_id!=='string'||!/^[a-z][a-z0-9_-]{2,63}$/.test(data.job_id)||
      !data.payload||typeof data.payload!=='object'||Array.isArray(data.payload)||
-     Object.keys(data.payload).sort().join(',')!=='nonce'|| !safeNonce.test(data.payload.nonce)) {
+     Object.keys(data.payload).sort().join(',')!=='nonce'||
+     typeof data.payload.nonce!=='string'|| !safeNonce.test(data.payload.nonce)) {
     // Never execute or acknowledge unknown work; lease will expire to interrupted.
     return {state:'refused_unknown_job'};
   }
