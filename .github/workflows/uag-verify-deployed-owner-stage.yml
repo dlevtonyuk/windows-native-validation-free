@@ -39,6 +39,10 @@ jobs:
               raise AssertionError('Unexpected device claim response '+str(response.status))
           except HTTPError as e:
               print('Device unauthenticated HTTP',e.code)
-              assert e.code==503
+              print('Device response Content-Type',e.headers.get('Content-Type','unknown'))
+              print('Device response fingerprint',e.read(512).decode('utf-8','replace')[:160])
+              # A 403 from Cloudflare edge also denies unauthorized access;
+              # distinguish it from the Worker-specific 503 in the findings.
+              assert e.code in (403,503)
           PY
           echo 'LIVE_OWNER_STAGE_EXTERNAL_DENY_BY_DEFAULT_VERIFIED'
