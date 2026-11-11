@@ -1,0 +1,29 @@
+# Read-only/no-secret external proof of owner-approved live staging Worker.
+name: UAG Validate Live Inert Owner Stage
+on:
+  push:
+    branches:
+      - research/uag-staging-owner-stage-candidate-20261111
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  external-safe-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify public health and fail-closed admin route, without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://windows-native-validation-free.dlevtonyuk.workers.dev'
+          curl -fsS --retry 2 --retry-delay 1 --max-time 18 "$base/health" | python -c 'import json,sys; assert json.load(sys.stdin)=={"service":"universal-gateway","status":"no_public_capabilities"}'
+          # A POST with no Access identity must be rejected before any SQL or signature validation.
+          status=$(curl -sS --retry 2 --retry-delay 1 --max-time 18 -o /tmp/owner-stage-denial.json -w '%{http_code}' -X POST "$base/owner/policy/stage" -H 'Content-Type: application/json' -d '{}')
+          test "$status" = 403
+          python -c 'import json; assert json.load(open("/tmp/owner-stage-denial.json"))=={"error":"owner_access_required"}'
+          status=$(curl -sS --retry 2 --retry-delay 1 --max-time 18 -o /dev/null -w '%{http_code}' -X POST "$base/v1/jobs" -H 'Content-Type: application/json' -d '{}')
+          test "$status" = 401
+          status=$(curl -sS --retry 2 --retry-delay 1 --max-time 18 -o /dev/null -w '%{http_code}' "$base/v1/device/claim?device=office_pc")
+          test "$status" = 503
+          echo 'LIVE_OWNER_STAGE_EXTERNAL_DENY_BY_DEFAULT_VERIFIED'
