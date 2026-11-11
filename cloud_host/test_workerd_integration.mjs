@@ -92,9 +92,20 @@ let live=null;
 try{
   await command(["d1","execute","DB","--local","--config",config,
     "--persist-to",persistence,"--file","cloud_host/schema.sql","--yes"]);
+  // Real workerd route must reject an Access-less owner request even when
+  // local test keys and D1 exist. No owner staged rows or capabilities.
   const old=await signedPolicy(1,true);
   live=await launch(old);
   assert.equal(await submit(live,"lab_initial_001"),202,"Initial signed grant failed");
+  const ownerAttempt=await fetch(live.base+"/owner/policy/stage",{
+    method:"POST",headers:{"origin":live.base,"content-type":"application/json"},
+    body:JSON.stringify({policy_json:old.policy,signature_b64:old.sig})
+  });
+  assert.equal(ownerAttempt.status,403,
+    "Owner-policy staging without Cloudflare Access identity must fail closed");
+  assert.equal((await ownerAttempt.json()).error,"owner_access_required");
+  console.log("WORKERD_OWNER_ACCESS_MISSING_DENIED_PASSED");
+
   // Real workerd HTTP route, not just a mocked gateway unit test.
   const rejected=await fetch(live.base+"/v1/jobs",{
     method:"POST",
