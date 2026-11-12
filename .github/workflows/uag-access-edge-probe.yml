@@ -1,0 +1,60 @@
+name: UAG Owner Access Path Boundary Probe (read only)
+on:
+  push:
+    branches:
+      - research/uag-access-edge-probes-20261112
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Observe production URL routing without following login redirects
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from urllib.request import Request, build_opener, HTTPRedirectHandler
+          from urllib.error import HTTPError
+          from urllib.parse import urlparse
+          base='https://windows-native-validation-free.dlevtonyuk.workers.dev'
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): return None
+          opener=build_opener(NoRedirect)
+          def check(path,method='GET',data=None):
+              headers={'User-Agent':'uag-ci-verification/1.0'}
+              if data is not None: headers.update({'Content-Type':'application/json','Origin':base})
+              req=Request(base+path,data=data,headers=headers,method=method)
+              try:
+                  q=opener.open(req,timeout=16)
+              except HTTPError as exc:
+                  q=exc
+              with q:
+                  status=q.status if hasattr(q,'status') else q.code
+                  loc=q.headers.get('Location','')
+                  body=q.read(400).decode('utf-8','replace')
+                  print(json.dumps({'path':path,'method':method,'status':status,'location_host':urlparse(loc).hostname,
+                                    'content_type':q.headers.get('Content-Type',''),'body_prefix':body[:115] if not loc else ''}))
+                  return status,loc,body
+          status,loc,body=check('/health')
+          assert status==200 and json.loads(body)=={'service':'universal-gateway','status':'no_public_capabilities'}
+          owner=[]
+          for path,method,data in [
+              ('/owner/policy/stage','GET',None),
+              ('/owner/policy/stage','POST',b'{}'),
+              ('/owner/test','GET',None)]:
+              s,location,body=check(path,method,data)
+              assert s in (302,303,307,308,401,403), 'Owner route is not access-protected'
+              assert body.strip()!='{"error":"owner_access_required"}', 'Worker handled request without edge Access'
+              assert s not in (200,404), 'Owner path reached public origin'
+              if location:
+                  assert 'cloudflareaccess.com' in (urlparse(location).hostname or ''), 'Unexpected Access redirect host'
+              owner.append(s)
+          s,loc,body=check('/v1/jobs','POST',b'{}')
+          assert s==401,'Public job API behavior unexpectedly changed'
+          s,loc,body=check('/v1/device/claim?device=office_pc')
+          assert s==503 and json.loads(body)=={'error':'device_tokens_unconfigured'},'Device still must be locked'
+          print('ACCESS_EDGE_OWNER_PATH_ONLY_VERIFIED')
+          PY
