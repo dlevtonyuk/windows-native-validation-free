@@ -1,4 +1,5 @@
 import concurrent.futures
+from contextlib import closing
 import hashlib
 import sqlite3
 import tempfile
@@ -73,7 +74,7 @@ class LedgerSecurityTest(unittest.TestCase):
  def test_event_history_is_append_only(self):
   a=reserve(self.db,sample(2),10);finalize(self.db,a['claim_id'],'failed',11)
   b=reserve(self.db,sample(3),12);finalize(self.db,b['claim_id'],'deployed',13)
-  with sqlite3.connect(self.db) as conn:
+  with closing(sqlite3.connect(self.db)) as conn:
    seq=conn.execute('SELECT revision,event_type FROM release_events ORDER BY event_id').fetchall()
   self.assertEqual(seq,[(2,'reserved'),(2,'failed'),(3,'reserved'),(3,'deployed')])
 if __name__=='__main__':unittest.main()
