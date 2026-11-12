@@ -83,3 +83,27 @@ Open **ChatGPT Settings > Plugins** (or Apps if Plugins is not shown), choose **
 - GitHub `get_profile` confirms the connected repository app acts as the **account owner's GitHub principal**. A username-specific rule alone cannot guarantee separation from assistant-initiated API mutations; prefer app-scoped permissions, independent release gates, and positive tests before any claim of owner-exclusive repository deployments. The available GitHub connector lacks repository-administration endpoints, but that is a current tool limitation, **not a permanent security guarantee**.
 - GitHub Free supports rulesets in public repositories, including the present public validation repo, but details such as the one-person pull-request approval flow and bypass privileges must be tested on a disposable branch first. Source: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository
 - A read-only probe of Cloudflare `GET /user/tokens/verify` returned `Invalid API Token` because this is an API token verification route, not a reliable OAuth grants inventory for this MCP connection. DO NOT interpret it as a failed app OAuth connection: authorized D1/Worker calls still work.
+
+
+## 2026-11-12 VERIFIED COMPLETION: Cloudflare Access owner-only stage (supersedes older "missing scopes" language above)
+
+The user reconnected the official Cloudflare API plugin and explicitly refreshed tools. Live read-only API calls verified **both** `GET /access/apps` and `GET /access/identity_providers`, removing the OAuth permissions blocker without requesting any other grant.
+
+The assistant executed the previously user-approved path-specific Access configuration. Created exactly one self-hosted Access application (no prior apps existed), named `UAG Owner Policy Staging`, on `windows-native-validation-free.dlevtonyuk.workers.dev/owner/*`; scope is only a single public Worker hostname/path. It uses the existing Cloudflare default identity provider, already configured `restrict_to_account_members:true`, with an additional exact owner-email-only allow policy. No broad public Access rule, Worker-wide Access rule, another Worker, billing modification, additional identity provider, or enabled jobs.
+
+API response and readback verified the newly created app, one allow policy, matching exact domain, identity-provider restriction, hidden app-launcher listing, and 2-hour session limit. Its application ID is `5b57ebde-fd95-44db-8c84-3ea7c5e17621` (not a credential); policy ID `72a5de45-acbe-456d-aa46-5b248449a42a`. **Do not post user email, Access sessions, private keys, or secrets in public GitHub.**
+
+Real live externally hosted GitHub Action URL: https://github.com/dlevtonyuk/windows-native-validation-free/actions/runs/43215153302
+
+Verified responses:
+- `GET /health` => 200, exactly `{"service":"universal-gateway","status":"no_public_capabilities"}`.
+- `GET /owner/policy/stage` => 302 redirect to the account's Access login host.
+- `POST /owner/policy/stage` => 302 to Access login host.
+- `GET /owner/test` => 302 to Access login host (covers the wildcard path).
+- `POST /v1/jobs` without bearer token => 401 Unauthorized.
+- `GET /v1/device/claim?device=office_pc` => 503 `device_tokens_unconfigured`.
+- Existing D1 prior to Access app creation: `jobs=0`, `owner_policy_stage=0`, `owner_policy_state=0`. Creating Access app does not write D1.
+
+**Completed:** approved standalone owner Access application and edge-level denial; no more reconnect or Zero Trust enrollment required. The external probe tests *unauthenticated* requests only, not a live owner login session. The Worker handler still lacks production `OWNER_ACCESS_AUD`/`OWNER_ACCESS_EMAIL` and owner-public-signing-key configuration, intentionally fail-closed. No owner private key is present. No active production workloads.
+
+**Remaining global gate:** the auto-deployed GitHub staging branch is `protected:false` and there are zero repository rulesets; a trusted, owner-exclusive release boundary must be established before any real jobs or owner-only toggles can be considered secured against assistant-initiated code replacement. Do not enable Cron, real device credentials, business APIs or elevated Worker write scopes as a workaround.
