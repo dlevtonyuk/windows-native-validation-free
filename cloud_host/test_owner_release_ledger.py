@@ -4,7 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from owner_release_ledger import reserve,finalize,status,ReplayBlocked,UnsafeInput
+from owner_release_ledger import initialize,reserve,finalize,status,ReplayBlocked,UnsafeInput
 
 def sample(rev=1,worker='synthetic_only'):
  return {'target_worker':worker,'repository':'research/disposable',
@@ -17,6 +17,7 @@ class LedgerSecurityTest(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory()
   self.addCleanup(self.tmp.cleanup)
   self.db=str(Path(self.tmp.name)/'ledger.sqlite')
+  initialize(self.db)
  def test_durable_success_claim_only_once(self):
   r=reserve(self.db,sample(1),1)
   self.assertEqual(r['state'],'reserved')
@@ -55,11 +56,20 @@ class LedgerSecurityTest(unittest.TestCase):
   a=sample();a['unknown']=True;items.append(a)
   for v in items:
    with self.assertRaises(UnsafeInput):reserve(self.db,v,123)
-  self.assertFalse(Path(self.db).exists())
+  self.assertEqual(status(self.db)['attempts'],[])
  def test_independent_worker_revisions(self):
   reserve(self.db,sample(1,'worker_one'),10)
   reserve(self.db,sample(1,'worker_two'),11)
   self.assertEqual(len(status(self.db)['heads']),2)
+ def test_lost_ledger_refuses_automatic_recreation(self):
+  reserve(self.db,sample(31),11)
+  Path(self.db).unlink()
+  with self.assertRaises(UnsafeInput):status(self.db)
+  with self.assertRaises(UnsafeInput):reserve(self.db,sample(31),12)
+  self.assertFalse(Path(self.db).exists())
+ def test_initialization_never_overwrites(self):
+  with self.assertRaises(UnsafeInput):initialize(self.db)
+  self.assertEqual(status(self.db)['heads'],[])
  def test_event_history_is_append_only(self):
   a=reserve(self.db,sample(2),10);finalize(self.db,a['claim_id'],'failed',11)
   b=reserve(self.db,sample(3),12);finalize(self.db,b['claim_id'],'deployed',13)
