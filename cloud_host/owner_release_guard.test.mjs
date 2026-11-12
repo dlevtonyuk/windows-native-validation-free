@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateKeyPairSync,sign,createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
+import {dirname,join as joinPath} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -26,7 +29,11 @@ const expected={repository:'research/disposable',branch:'approved/synthetic',
  artifactBytes:artifact};
 function scratch(){
  const dir=mkdtempSync(join(tmpdir(),'uag-synthetic-release-'));
- return {db:join(dir,'ledger.sqlite'),close:()=>rmSync(dir,{force:true,recursive:true})};
+ const db=join(dir,'ledger.sqlite');
+ const script=joinPath(dirname(fileURLToPath(import.meta.url)),'owner_release_ledger.py');
+ const p=spawnSync('python',[script,'init','--db',db],{encoding:'utf8',timeout:10000});
+ assert.equal(p.status,0,'Only the synthetic owner fixture explicitly initializes the ledger');
+ return {db,close:()=>rmSync(dir,{force:true,recursive:true})};
 }
 test('valid signed source is reserved then completed once',()=>{
  const x=scratch();try{
@@ -64,6 +71,14 @@ test('forged signature and different owner public key are refused',()=>{
   const wrongKey=generateKeyPairSync('ed25519').publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('base64');
   assert.throws(()=>reserveVerifiedRelease({dbPath:x.db,envelope:signManifest(manifest(1)),expected:{...expected,pinnedOwnerPublicKeyB64:wrongKey}}),/owner_signature_invalid/);
   assert.equal(readReleaseLedger({dbPath:x.db}).attempts.length,0);
+ }finally{x.close()}
+});
+test('lost trusted ledger is never recreated by a signed release',()=>{
+ const x=scratch();try{
+  reserveVerifiedRelease({dbPath:x.db,envelope:signManifest(manifest(22)),expected});
+  rmSync(x.db,{force:true});
+  assert.throws(()=>readReleaseLedger({dbPath:x.db}),/trusted_ledger_denied/);
+  assert.throws(()=>reserveVerifiedRelease({dbPath:x.db,envelope:signManifest(manifest(22)),expected}),/trusted_ledger_denied/);
  }finally{x.close()}
 });
 test('invalid ledger and unsupported completion fail closed',()=>{
