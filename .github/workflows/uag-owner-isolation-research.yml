@@ -1,0 +1,30 @@
+name: UAG owner-isolated release preflight research
+on:
+  push:
+    branches:
+      - research/uag-owner-isolated-release-20261112
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  negative-access-policy-fixtures:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test cloud_host/owner_isolation_preflight.test.mjs
+      - run: node --test cloud_host/owner_release_verifier.test.mjs cloud_host/owner_release_guard.test.mjs
+      - name: Assert this job contains no Cloudflare deployment authority
+        shell: bash
+        run: |
+          test -z "${CLOUDFLARE_API_TOKEN:-}" || exit 2
+          echo "OWNER_ISOLATION_RESEARCH_ONLY"
