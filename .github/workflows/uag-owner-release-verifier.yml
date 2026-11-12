@@ -1,0 +1,28 @@
+name: UAG Independent Owner Release Verifier Research
+on:
+  push:
+    branches:
+      - research/uag-owner-release-verifier-20261112
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-release-signature:
+    if: ${{ github.event.repository.private == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate approved source SHA, narrow release identity and replay denial
+        run: node --test cloud_host/owner_release_verifier.test.mjs
+      - name: Verify previous owner signing and synthetic runner regressions
+        run: node --test cloud_host/owner_policy_vault.test.mjs cloud_host/synthetic_agent.test.mjs
