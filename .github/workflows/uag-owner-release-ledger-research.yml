@@ -33,3 +33,19 @@ jobs:
         run: node --test cloud_host/owner_release_verifier.test.mjs cloud_host/owner_release_guard.test.mjs
       - name: Existing disposable owner signature regressions
         run: node --test cloud_host/owner_policy_vault.test.mjs
+
+  upload-only-dry-run:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Wrangler only in disposable CI runner
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Verify upload-only Worker version compilation (no credentials, no deployment)
+        run: npx wrangler versions upload --dry-run --config cloud_host/wrangler.d1.pending.toml
