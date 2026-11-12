@@ -65,14 +65,32 @@ def checked_release(v):
   raise UnsafeInput('invalid_branch')
  return v
 
-def connect(path):
+def initialize(path):
+ """Explicit owner-controlled init; no automatic empty-DB recovery."""
  if not path or not isinstance(path,str) or not Path(path).parent.is_dir():
   raise UnsafeInput('invalid_ledger_path')
- conn=sqlite3.connect(path,timeout=5,isolation_level=None)
+ if Path(path).exists() or Path(path).is_symlink():
+  raise UnsafeInput('ledger_already_exists')
+ db=sqlite3.connect(path,timeout=5,isolation_level=None)
+ try:
+  db.execute('PRAGMA synchronous=FULL')
+  db.executescript(SCHEMA)
+  return {'state':'initialized'}
+ finally:db.close()
+
+def connect(path):
+ if not path or not isinstance(path,str) or not Path(path).is_file() or Path(path).is_symlink():
+  raise UnsafeInput('ledger_missing_or_untrusted')
+ from urllib.parse import quote
+ uri='file:'+quote(str(Path(path).absolute()),safe='/')+'?mode=rw'
+ conn=sqlite3.connect(uri,timeout=5,isolation_level=None,uri=True)
  conn.execute('PRAGMA busy_timeout=5000')
  conn.execute('PRAGMA synchronous=FULL')
  conn.execute('PRAGMA foreign_keys=ON')
- conn.executescript(SCHEMA)
+ tables={name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+ if not {'release_heads','release_attempts','release_events'}.issubset(tables):
+  conn.close()
+  raise UnsafeInput('ledger_schema_missing')
  return conn
 
 def reserve(path,receipt,now_ms=None):
@@ -135,13 +153,14 @@ def status(path):
 
 def main():
  p=argparse.ArgumentParser(description='OFFLINE only: no deployments')
- p.add_argument('action',choices=('reserve','finalize','status'))
+ p.add_argument('action',choices=('init','reserve','finalize','status'))
  p.add_argument('--db',required=True)
  p.add_argument('--claim-id')
  p.add_argument('--result',choices=('deployed','failed'))
  a=p.parse_args()
  try:
-  if a.action=='reserve':res=reserve(a.db,json.loads(sys.stdin.read(4096)))
+  if a.action=='init':res=initialize(a.db)
+  elif a.action=='reserve':res=reserve(a.db,json.loads(sys.stdin.read(4096)))
   elif a.action=='finalize':res=finalize(a.db,a.claim_id,a.result)
   else:res=status(a.db)
   print(json.dumps(res,separators=(',',':')))
