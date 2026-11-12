@@ -82,7 +82,7 @@ def connect(path):
  if not path or not isinstance(path,str) or not Path(path).is_file() or Path(path).is_symlink():
   raise UnsafeInput('ledger_missing_or_untrusted')
  from urllib.parse import quote
- uri='file:'+quote(str(Path(path).absolute()),safe='/')+'?mode=rw'
+ uri='file:'+quote(Path(path).resolve().as_posix(),safe='/:')+'?mode=rw'
  conn=sqlite3.connect(uri,timeout=5,isolation_level=None,uri=True)
  conn.execute('PRAGMA busy_timeout=5000')
  conn.execute('PRAGMA synchronous=FULL')
