@@ -22,6 +22,7 @@ jobs:
         with:
           node-version: '22'
       - run: node --test cloud_host/owner_isolation_preflight.test.mjs
+      - run: node cloud_host/owner_isolation_observed_snapshot.mjs
       - run: node --test cloud_host/owner_release_verifier.test.mjs cloud_host/owner_release_guard.test.mjs
       - name: Assert this job contains no Cloudflare deployment authority
         shell: bash
