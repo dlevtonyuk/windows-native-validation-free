@@ -1,0 +1,43 @@
+# Synthetic-only independent adapter-side grant verification research.
+# Uses ephemeral keys and local SQLite. No Cloudflare or production deployment.
+name: UAG owner effect gate research
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'gateway_core/owner_effect_gate.mjs'
+      - 'gateway_core/owner_effect_gate.test.mjs'
+      - 'gateway_core/owner_effect_ledger.py'
+      - 'gateway_core/test_owner_effect_ledger.py'
+      - '.github/workflows/uag-owner-effect-gate-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trusted-adapter-research:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: One-use owner-effect ledger local SQLite tests
+        run: python -m unittest discover -s gateway_core -p test_owner_effect_ledger.py -v
+      - name: Real Ed25519 and disposable SQLite end-to-end integration
+        run: node --test gateway_core/owner_effect_gate.test.mjs
+      - name: Confirm no cloud deployment or production credentials
+        shell: bash
+        run: |
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${OWNER_PRIVATE_KEY:-}"
+          echo 'UAG_OWNER_EFFECT_BOUNDARY_OFFLINE_ONLY'
