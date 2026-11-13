@@ -1,0 +1,15 @@
+# REVIEW ONLY: requires owner-approved isolated synthetic lane and actual Free billing verification.
+# Replace database_id AFTER separately authorized D1 database provisioning.
+# NEVER DEPLOY THIS TEMPLATE: placeholder UUID is intentionally unusable.
+name = "uag-synthetic-cron-independent"
+main = "worker.mjs"
+compatibility_date = "2026-11-08"
+workers_dev = true
+
+[triggers]
+crons = ["0 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uag-synthetic-cron-independent"
+database_id = "00000000-0000-0000-0000-000000000000"

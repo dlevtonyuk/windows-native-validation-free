@@ -1,0 +1,67 @@
+# Non-deployment, secret-free independent scheduled synthetic lane research.
+name: UAG independent synthetic Cron / local D1 proof
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - '.github/workflows/uag-independent-synthetic-cron-research.yml'
+      - 'cloud_host/synthetic_cron/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uag-synthetic-cron-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  isolated-synthetic-schedule:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify pure synthetic unit tests
+        run: node --test cloud_host/synthetic_cron/test_worker.mjs
+      - name: Install pinned Wrangler into disposable runner only
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Compile isolated local-only candidate without deployment
+        run: npx wrangler deploy --dry-run --config cloud_host/synthetic_cron/wrangler.lab.toml
+      - name: Real local workerd Cron and D1 receipt integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WRANGLER_SEND_METRICS=false
+          path="$RUNNER_TEMP/uag-synthetic-cron-d1"
+          mkdir -p "$path"
+          npx wrangler d1 execute DB --local --config cloud_host/synthetic_cron/wrangler.lab.toml --persist-to "$path" --file cloud_host/synthetic_cron/schema.sql --yes
+          npx wrangler dev --local --ip 127.0.0.1 --port 18879 --test-scheduled --config cloud_host/synthetic_cron/wrangler.lab.toml --persist-to "$path" > "$RUNNER_TEMP/uag-synthetic-cron.log" 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for n in $(seq 1 50); do
+            if curl -fsS --max-time 2 http://127.0.0.1:18879/health -o "$RUNNER_TEMP/synth-health.json"; then ready=1; break; fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then tail -n 100 "$RUNNER_TEMP/uag-synthetic-cron.log"; exit 1; fi
+            sleep 0.5
+          done
+          test "$ready" -eq 1
+          python -c 'import json,sys;assert json.load(open(sys.argv[1]))=={"service":"uag-synthetic-cron","status":"no_business_capabilities"}' "$RUNNER_TEMP/synth-health.json"
+          code=$(curl --max-time 4 -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18879/v1/jobs -d '{}')
+          test "$code" = 404
+          code=$(curl --max-time 4 -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18879/status)
+          test "$code" = 404
+          ts=$(node -e 'process.stdout.write(String(Math.floor(Date.now()/3600000)*3600000))')
+          printf '{"cron":"0 * * * *","scheduled_time":%s}' "$ts" > "$RUNNER_TEMP/scheduled-request.json"
+          for n in 1 2; do
+            curl --fail-with-body --max-time 20 -sS -X POST \
+              'http://127.0.0.1:18879/cdn-cgi/local/explorer/api/local/scheduled?worker=uag-synthetic-cron-lab' \
+              -H 'content-type: application/json' --data-binary @"$RUNNER_TEMP/scheduled-request.json" \
+              -o "$RUNNER_TEMP/scheduled-response-${n}.json"
+          done
+          npx wrangler d1 execute DB --local --config cloud_host/synthetic_cron/wrangler.lab.toml --persist-to "$path" --command 'SELECT COUNT(*) AS n,MIN(kind) AS kind FROM synthetic_cron_receipts' --json > "$RUNNER_TEMP/receipts.json"
+          python -c 'import json,sys; x=json.load(open(sys.argv[1])); y=x[0]["results"][0]; assert y=={"n":1,"kind":"synthetic_heartbeat"},y' "$RUNNER_TEMP/receipts.json"
+          echo 'UAG_REAL_WORKERD_CRON_D1_IDEMPOTENT_SYNTHETIC_RECEIPT_PASSED'
+          echo 'UAG_REMOTE_CLOUDFLARE_DEPLOYMENT_COUNT_ZERO'

@@ -1,0 +1,13 @@
+# Disposable LOCAL D1 experiment only. Never upload, publish or deploy.
+name = "uag-synthetic-cron-lab"
+main = "worker.mjs"
+compatibility_date = "2026-11-08"
+workers_dev = false
+
+[triggers]
+crons = ["0 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uag-synthetic-cron-lab-local-only"
+database_id = "00000000-0000-4000-8000-000000000001"

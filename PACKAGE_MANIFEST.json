@@ -1,0 +1,40 @@
+{
+  "scope": "Research-only synthetic Cron D1 candidate, no secrets, no remote deployment",
+  "files": [
+    {
+      "path": ".github/workflows/uag-independent-synthetic-cron-research.yml",
+      "size": 3855,
+      "sha256": "89de78c1dbe052d6d7c1794d858f5f436ce356cac1db366722bee0683da87afa"
+    },
+    {
+      "path": "cloud_host/synthetic_cron/README.md",
+      "size": 4723,
+      "sha256": "828d71a59cd0faa27cb6d3d8eef6ba50bf41d6e17c86e88bc0e4c3a55f0eaa29"
+    },
+    {
+      "path": "cloud_host/synthetic_cron/schema.sql",
+      "size": 432,
+      "sha256": "e1e5af127db7990bf5eba62390029cea09fd1e02d94a9ead16fb7101825210dc"
+    },
+    {
+      "path": "cloud_host/synthetic_cron/test_worker.mjs",
+      "size": 2480,
+      "sha256": "2bd5339aedba9d58b3a63f656d4bee57b419c1dd911f0631e395121fd4078269"
+    },
+    {
+      "path": "cloud_host/synthetic_cron/worker.mjs",
+      "size": 2037,
+      "sha256": "643ba09cc0a49aa5bf79537793c1c36a8c1e64450c176a74b70e70e7f046ad89"
+    },
+    {
+      "path": "cloud_host/synthetic_cron/wrangler.future-approval.example.toml",
+      "size": 533,
+      "sha256": "279c87b23f8b9eda985b264f62f0b75068d127489bd7293ca504e6a3b470606d"
+    },
+    {
+      "path": "cloud_host/synthetic_cron/wrangler.lab.toml",
+      "size": 350,
+      "sha256": "2f709c80dd8ed266c7b28baea8e3f750d3fdce1a9895665b03ce5768afabad71"
+    }
+  ]
+}
