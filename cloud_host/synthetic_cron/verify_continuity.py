@@ -37,6 +37,8 @@ def check_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("invalid_clock_or_first_slot")
     if start % SLOT_MS:
         raise ValueError("first_slot_not_hour_aligned")
+    if start != FIRST_LIVE_SLOT_MS:
+        raise ValueError("unapproved_first_slot")
     if not isinstance(rows, list) or len(rows) > MAX_RECEIPTS:
         raise ValueError("too_many_or_invalid_rows")
     if now < start - SLOT_MS:
@@ -45,6 +47,7 @@ def check_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("observation_outside_finite_pilot_window")
 
     invalid = []
+    future_slots = []
     slot_occurrences: dict[int, int] = {}
     for i, row in enumerate(rows):
         if not isinstance(row, dict) or set(row) != {
@@ -56,7 +59,11 @@ def check_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         if type(slot) is not int or type(scheduled) is not int:
             invalid.append({"index": i, "reason": "invalid_time_type"})
             continue
-        if slot % SLOT_MS or slot < start or slot > now:
+        if slot > now:
+            future_slots.append(slot)
+            invalid.append({"index": i, "reason": "future_slot"})
+            continue
+        if slot % SLOT_MS or slot < start:
             invalid.append({"index": i, "reason": "unexpected_slot"})
             continue
         if kind != REQUIRED_KIND:
@@ -75,7 +82,7 @@ def check_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     required = range(start, due_last + SLOT_MS, SLOT_MS)
     missing = [slot for slot in required if slot not in slot_occurrences]
     duplicates = sorted(slot for slot, count in slot_occurrences.items() if count > 1)
-    unexpected = sorted(slot for slot in slot_occurrences if slot > ((now // SLOT_MS) * SLOT_MS))
+    unexpected = sorted(set(future_slots))
     ordered = sorted(slot_occurrences)
     continuous_hours = (ordered[-1] - ordered[0]) // SLOT_MS if ordered else 0
     problem = bool(invalid or missing or duplicates or unexpected)

@@ -79,6 +79,18 @@ class ContinuityWitnessTests(unittest.TestCase):
         self.assertEqual(bad["status"], "FAILED")
         self.assertFalse(bad["continuous_48h_window"])
 
+    def test_original_expected_first_hour_cannot_be_moved_forward(self):
+        shifted = sample(2 * SLOT_MS + 20 * 60_000, item(2))
+        shifted["first_expected_slot_ms"] = FIRST + 2 * SLOT_MS
+        with self.assertRaisesRegex(ValueError, "unapproved_first_slot"):
+            check_snapshot(shifted)
+
+    def test_future_dated_receipt_is_explicitly_reported(self):
+        r = check_snapshot(sample(20 * 60_000, item(0), item(1)))
+        self.assertEqual(r["status"], "FAILED")
+        self.assertEqual(r["unexpected_future_slots_ms"], [FIRST + SLOT_MS])
+        self.assertEqual(r["invalid_rows"][-1]["reason"], "future_slot")
+
     def test_reject_stale_long_ago_or_future_clock(self):
         with self.assertRaisesRegex(ValueError, "outside_finite"):
             check_snapshot(sample(91 * SLOT_MS))
