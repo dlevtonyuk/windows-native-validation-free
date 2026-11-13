@@ -1,0 +1,9 @@
+{
+  "dual_witness_fence.py": "0269ff7facec60ae18ec6a3c70d098e0e7e63527db750e25696b1ec5793833dc",
+  "final_quorum_fence.py": "926a19049881cc598c2d5843c74874f809f2f0df4f6fdfd661acd19ce16654c6",
+  "owner_revocation_witness.py": "f00de12488e85dcf248a8374bbff6900935cdd16724982a9b711e6ba87f78b51",
+  "test_dual_witness_fence.py": "f28ff40280c98c34af977836c1d0524acf0ebef6a758fd12369da726be82edd9",
+  "test_final_quorum_fence.py": "75ac512b7c65c7b0f229d9aea16ed8726017f0855827271ab1166b1b94894b55",
+  "uag/__init__.py": "983cf60270eb5908991f87eb8a0e9ede1ad3b50e4ca3a61c4e40529cd2b804bb",
+  "uag/policy.py": "16e9d6f04eccb737a8a5ceee3f951ae70d8fbd55ebaaae8fdcce77020816ff87"
+}
