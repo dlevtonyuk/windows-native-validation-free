@@ -93,6 +93,51 @@ def connect(path):
   raise UnsafeInput('ledger_schema_missing')
  return conn
 
+def assert_consistent_ledger(db):
+ """Fail closed when stored revision history and high-water heads disagree.
+ This detects accidental/tampered inconsistent SQLite state; a writer able
+ to rewrite every table can still forge consistent records. NOT immutable.
+ Caller MUST hold a SQLite read/write transaction for a consistent snapshot.
+ """
+ head_mismatch=db.execute("""
+ SELECT 1 FROM release_heads h WHERE
+ NOT EXISTS (
+  SELECT 1 FROM release_attempts a
+  WHERE a.target_worker=h.target_worker AND a.revision=h.highest_revision
+   AND a.artifact_sha256=h.latest_artifact_sha256
+   AND a.source_commit=h.latest_commit
+ ) OR EXISTS (
+  SELECT 1 FROM release_attempts a
+  WHERE a.target_worker=h.target_worker AND a.revision>h.highest_revision
+ ) LIMIT 1
+ """).fetchone()
+ orphan_attempt=db.execute("""
+ SELECT 1 FROM release_attempts a WHERE NOT EXISTS (
+  SELECT 1 FROM release_heads h WHERE h.target_worker=a.target_worker
+ ) LIMIT 1
+ """).fetchone()
+ missing_event=db.execute("""
+ SELECT 1 FROM release_attempts a WHERE
+ NOT EXISTS (
+  SELECT 1 FROM release_events e WHERE e.claim_id=a.claim_id
+   AND e.target_worker=a.target_worker AND e.revision=a.revision
+   AND e.event_type='reserved'
+ ) OR (a.state<>'reserved' AND NOT EXISTS (
+  SELECT 1 FROM release_events e WHERE e.claim_id=a.claim_id
+   AND e.target_worker=a.target_worker AND e.revision=a.revision
+   AND e.event_type=a.state
+ )) LIMIT 1
+ """).fetchone()
+ orphan_event=db.execute("""
+ SELECT 1 FROM release_events e WHERE NOT EXISTS (
+  SELECT 1 FROM release_attempts a WHERE a.claim_id=e.claim_id
+   AND a.target_worker=e.target_worker AND a.revision=e.revision
+ ) LIMIT 1
+ """).fetchone()
+ if any((head_mismatch,orphan_attempt,missing_event,orphan_event)):
+  raise UnsafeInput('ledger_history_inconsistent')
+
+
 def reserve(path,receipt,now_ms=None):
  a=checked_release(receipt)
  stamp=int(time.time()*1000) if now_ms is None else now_ms
@@ -101,6 +146,7 @@ def reserve(path,receipt,now_ms=None):
  db=connect(path)
  try:
   db.execute('BEGIN IMMEDIATE')
+  assert_consistent_ledger(db)
   row=db.execute('SELECT highest_revision FROM release_heads WHERE target_worker=?',(a['target_worker'],)).fetchone()
   if row and a['release_revision']<=row[0]:raise ReplayBlocked('revision_consumed')
   db.execute('INSERT INTO release_heads (target_worker,highest_revision,latest_artifact_sha256,latest_commit,updated_ms) VALUES(?,?,?,?,?) '
@@ -128,6 +174,7 @@ def finalize(path,claim,result,now_ms=None):
  db=connect(path)
  try:
   db.execute('BEGIN IMMEDIATE')
+  assert_consistent_ledger(db)
   row=db.execute('SELECT target_worker,revision FROM release_attempts WHERE claim_id=? AND state=?',(claim,'reserved')).fetchone()
   if row is None:raise ReplayBlocked('claim_absent_or_consumed')
   db.execute('UPDATE release_attempts SET state=?,finalized_ms=? WHERE claim_id=? AND state=?',(result,stamp,claim,'reserved'))
@@ -143,12 +190,19 @@ def finalize(path,claim,result,now_ms=None):
 def status(path):
  db=connect(path)
  try:
+  db.execute('BEGIN')
+  assert_consistent_ledger(db)
   heads=db.execute('SELECT target_worker,highest_revision,latest_artifact_sha256 FROM release_heads ORDER BY target_worker').fetchall()
   attempts=db.execute('SELECT target_worker,revision,state FROM release_attempts ORDER BY target_worker,revision').fetchall()
   events=db.execute('SELECT event_type,COUNT(*) FROM release_events GROUP BY event_type').fetchall()
-  return {'heads':[dict(target_worker=t,highest_revision=r,artifact_sha256=d) for t,r,d in heads],
+  result={'heads':[dict(target_worker=t,highest_revision=r,artifact_sha256=d) for t,r,d in heads],
      'attempts':[dict(target_worker=t,revision=r,state=s) for t,r,s in attempts],
      'event_counts':{k:v for k,v in events}}
+  db.execute('COMMIT')
+  return result
+ except Exception:
+  db.execute('ROLLBACK')
+  raise
  finally:db.close()
 
 def main():

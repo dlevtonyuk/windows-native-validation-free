@@ -71,6 +71,43 @@ class LedgerSecurityTest(unittest.TestCase):
  def test_initialization_never_overwrites(self):
   with self.assertRaises(UnsafeInput):initialize(self.db)
   self.assertEqual(status(self.db)['heads'],[])
+ def test_highwater_rollback_does_not_permit_older_revision(self):
+  reserve(self.db,sample(10),10)
+  with closing(sqlite3.connect(self.db)) as db:
+   db.execute("UPDATE release_heads SET highest_revision=1 WHERE target_worker='synthetic_only'")
+   db.commit()
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):status(self.db)
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):
+   reserve(self.db,sample(5),11)
+
+ def test_missing_head_and_modified_digest_fail_closed(self):
+  reserve(self.db,sample(10),10)
+  with closing(sqlite3.connect(self.db)) as db:
+   db.execute("UPDATE release_heads SET latest_artifact_sha256=? WHERE target_worker='synthetic_only'",('0'*64,))
+   db.commit()
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):status(self.db)
+  with closing(sqlite3.connect(self.db)) as db:
+   db.execute("DELETE FROM release_heads")
+   db.commit()
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):
+   reserve(self.db,sample(11),12)
+
+ def test_missing_reserved_event_denies_status_and_finalize(self):
+  c=reserve(self.db,sample(10),10)
+  with closing(sqlite3.connect(self.db)) as db:
+   db.execute("DELETE FROM release_events WHERE claim_id=?",(c['claim_id'],))
+   db.commit()
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):status(self.db)
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):
+   finalize(self.db,c['claim_id'],'deployed',11)
+
+ def test_orphan_event_denied_before_new_reservation(self):
+  with closing(sqlite3.connect(self.db)) as db:
+   db.execute("INSERT INTO release_events(target_worker,revision,event_type,claim_id,created_ms) VALUES('synthetic_only',1,'reserved',?,0)",('f'*32,))
+   db.commit()
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):reserve(self.db,sample(1),11)
+  with self.assertRaisesRegex(UnsafeInput,'ledger_history_inconsistent'):status(self.db)
+
  def test_event_history_is_append_only(self):
   a=reserve(self.db,sample(2),10);finalize(self.db,a['claim_id'],'failed',11)
   b=reserve(self.db,sample(3),12);finalize(self.db,b['claim_id'],'deployed',13)
