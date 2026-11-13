@@ -1,0 +1,31 @@
+# Research-only snapshot consistency: no provider credentials, secrets, network reads, or deploy operations.
+name: UAG synthetic Cron continuity witness (offline)
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - '.github/workflows/uag-synthetic-cron-continuity-witness-research.yml'
+      - 'cloud_host/synthetic_cron/verify_continuity.py'
+      - 'cloud_host/synthetic_cron/test_verify_continuity.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  continuity-evidence:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify hourly, 24h and 48h continuity gates on disposable fixture data
+        run: python -m unittest discover -s cloud_host/synthetic_cron -p test_verify_continuity.py -v
+      - name: Verify source compiles without network or cloud access
+        run: python -m py_compile cloud_host/synthetic_cron/verify_continuity.py cloud_host/synthetic_cron/test_verify_continuity.py
