@@ -58,7 +58,7 @@ for job_id in ('writeheld','deviceheld','connectorheld'):
 for job_id in ('readok','recovered'):
  assert len(d[job_id]['result_sha256'])==64,d[job_id]
 counts={e['kind']:e['n'] for e in events}
-assert counts=={'claimed':5,'retry_queued':1,'succeeded':2,'lease_recovered':1,'deadletter':1},counts
+assert counts=={'claimed':6,'retry_queued':2,'succeeded':2,'lease_recovered':1,'deadletter':1},counts
 print('UAG_REAL_WORKERD_D1_DURABLE_MULTIJOB_LIFECYCLE_VERIFIED')
 print('UAG_EFFECT_LANES_REMAIN_DISABLED_3_OF_3')
 PY

@@ -16,7 +16,7 @@ class AuditAtomicity(unittest.TestCase):
  def query(self,sql,*args):return self.db.execute(sql,args).fetchall()
  def test_preexisting_claims_are_audited(self):
   self.assertEqual(self.query("SELECT job_id FROM dispatch_events WHERE kind='claimed' ORDER BY job_id"),
-    [('exhausted',),('recovered',)])
+    [('exhausted',),('exhausted',),('recovered',)])
  def test_update_and_event_are_one_transaction(self):
   self.db.execute("UPDATE dispatch_jobs SET state='running',attempts=1,lease_until_ms=100000,last_transition_ms=500 WHERE job_id='readok'")
   x=self.query("SELECT state,attempts FROM dispatch_jobs WHERE job_id='readok'")
@@ -34,7 +34,7 @@ class AuditAtomicity(unittest.TestCase):
  def test_expired_last_attempt_deadletter_audited(self):
   self.db.execute("UPDATE dispatch_jobs SET state='deadletter',last_error='expired_mock_lease_attempts_exhausted',lease_until_ms=NULL,last_transition_ms=1000 WHERE job_id='exhausted'")
   self.assertEqual(self.query("SELECT state,attempts FROM dispatch_jobs WHERE job_id='exhausted'"),[('deadletter',2)])
-  self.assertEqual(self.query("SELECT kind FROM dispatch_events WHERE job_id='exhausted'"),[('claimed',),('deadletter',)])
+  self.assertEqual(self.query("SELECT kind FROM dispatch_events WHERE job_id='exhausted'"),[('claimed',),('retry_queued',),('claimed',),('deadletter',)])
  def test_recovered_claim_logged_atomically(self):
   self.db.execute("UPDATE dispatch_jobs SET state='queued',last_error='expired_mock_lease',lease_until_ms=NULL,last_transition_ms=1000 WHERE job_id='recovered'")
   self.assertEqual(self.query("SELECT kind FROM dispatch_events WHERE job_id='recovered'"),[('claimed',),('lease_recovered',)])
