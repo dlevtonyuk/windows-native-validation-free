@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import handler,{acceptTelemetry,purgeExpired,RETENTION_CRON} from '../cloud/worker.mjs';
+// The production Worker must export only its default handler. To preserve
+// precise clock injection for offline tests, append test-only exports to a
+// memory-only data URL, never to deployed Worker source.
+const deployedSource=readFileSync(new URL('../cloud/worker.mjs',import.meta.url),'utf8');
+const testModule=deployedSource+'\nexport {acceptTelemetry,purgeExpired,RETENTION_CRON};\n';
+const {default:handler,acceptTelemetry,purgeExpired,RETENTION_CRON}=await import('data:text/javascript;base64,'+Buffer.from(testModule).toString('base64'));
 const schema=readFileSync(new URL('../cloud/schema.sql',import.meta.url),'utf8');
 const device='a'.repeat(32),token='A'.repeat(43),hash=createHash('sha256').update(token).digest('hex');
 const base=Date.parse('2026-11-14T13:00:00Z'),uuid='123e4567-e89b-42d3-a456-426614174000';
