@@ -46,3 +46,13 @@ jobs:
         run: |
           node --test research/windows-readonly-pilot/tests/test_worker.mjs
           python3 -m unittest discover -s research/windows-readonly-pilot/tests -p 'test_*.py'
+
+  worker-runtime-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated, secret-free Cloudflare Workers runtime
+        run: npm install --ignore-scripts --no-save --no-audit --no-fund miniflare@3
+      - name: Validate real workerd HTTP ingress and local D1, no remote access
+        run: node --test research/windows-readonly-pilot/tests/test_miniflare_runtime.mjs
