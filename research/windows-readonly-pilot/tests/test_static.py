@@ -2,6 +2,13 @@ from pathlib import Path
 import re,unittest,sqlite3,json
 P=Path(__file__).resolve().parent.parent
 class StaticSafeguards(unittest.TestCase):
+    def test_receiver_body_byte_bound_prevents_unlimited_read(self):
+        s=(P/'cloud'/'worker.mjs').read_text()
+        self.assertNotIn('request.text()', s.replace('// or untrusted. request.text() could buffer unlimited attacker-controlled input.',''))
+        self.assertIn('byteCount>1200', s)
+        self.assertIn("new TextDecoder('utf-8',{fatal:true})", s)
+        self.assertIn('reader.cancel()', s)
+
     def test_readonly_windows_collector_has_no_network(self):
         s=(P/'windows'/'Collect-ReadOnlyAggregate.ps1').read_text()
         for forbidden in ['Invoke-WebRequest','Invoke-RestMethod','Start-Process','Remove-Item','Stop-Process','Register-ScheduledTask','Get-CimInstance','Get-WmiObject']:
