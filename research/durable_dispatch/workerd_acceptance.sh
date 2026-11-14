@@ -31,12 +31,21 @@ done
 # Actual in-process local workerd scheduled event, invoked twice for same slot.
 ts=$(node -e 'process.stdout.write(String(Math.floor(Date.now()/3600000)*3600000))')
 printf '{"cron":"0 * * * *","scheduled_time":%s}' "$ts" >"$RUNNER_TEMP/uag-scheduled.json"
+# The FIRST two invocations race for the SAME slot, then one more replay.
+# Unique slot claim must serialize dispatch, with no double execution.
+pids=()
 for i in 1 2; do
   curl --fail-with-body --max-time 30 -sS -X POST \
     'http://127.0.0.1:18921/cdn-cgi/local/explorer/api/local/scheduled?worker=uag-durable-dispatch-lab' \
     -H 'content-type: application/json' --data-binary @"$RUNNER_TEMP/uag-scheduled.json" \
-    -o "$RUNNER_TEMP/uag-scheduled-response-$i.json"
+    -o "$RUNNER_TEMP/uag-scheduled-response-$i.json" &
+  pids+=("$!")
 done
+for p in "${pids[@]}"; do wait "$p"; done
+curl --fail-with-body --max-time 30 -sS -X POST \
+  'http://127.0.0.1:18921/cdn-cgi/local/explorer/api/local/scheduled?worker=uag-durable-dispatch-lab' \
+  -H 'content-type: application/json' --data-binary @"$RUNNER_TEMP/uag-scheduled.json" \
+  -o "$RUNNER_TEMP/uag-scheduled-replay.json"
 npx wrangler d1 execute DB --local --config "$conf" --persist-to "$persist" --command "SELECT slot_ms,dispatch_type FROM dispatch_ticks" --json >"$RUNNER_TEMP/uag-ticks.json"
 npx wrangler d1 execute DB --local --config "$conf" --persist-to "$persist" --command "SELECT job_id,route,state,attempts,result_sha256,last_error FROM dispatch_jobs ORDER BY job_id" --json >"$RUNNER_TEMP/uag-jobs.json"
 npx wrangler d1 execute DB --local --config "$conf" --persist-to "$persist" --command "SELECT kind,COUNT(*) AS n FROM dispatch_events GROUP BY kind ORDER BY kind" --json >"$RUNNER_TEMP/uag-events.json"
