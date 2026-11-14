@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {assessCostCodeEdit,assessTimecardApproval,API_CONTRACT} from './preflight.mjs';
+const t=1794672000;
+function fx(){
+ const a={work_site_id:12,selections:[{project_id:123,percent:1,cost_codes:[{cost_code_id:11,percent:1}]}]};
+ const s={id:17,status:'approved',is_editable:true,updated_at_unix:t,start_dt_unix:t-3600,end_dt_unix:t,time_approver_id:18,breaks:[],cost_allocation_selections:[a]};
+ const p={start_dt_unix:s.start_dt_unix,updated_at_unix:t,end_dt_unix:t,time_approver_id:18,breaks:[],cost_allocation_selections:[structuredClone(a)],reason:'Correct coded project time'};
+ const arg={authoritativeFullSnapshot:s,proposedReplacement:p,allowedCodesByProject:{123:[11,22]},reason:p.reason};
+ return arg;
+}
+const flag=(a,n)=>assert.ok(a.errors.includes(n),`expected ${n}: ${a.errors}`);
+test('positive synthetic candidate still has absolutely NO effect transport',()=>{const x=assessCostCodeEdit(fx());assert.equal(x.candidate,true);assert.equal(x.effectEnabled,false);assert.equal(x.requestTransport,'NONE')});
+test('public API schema identifies wholesale PUT',()=>assert.equal(API_CONTRACT.update.fullReplacement,true));
+test('official rate budget conservative and sequential timecard list',()=>{assert.equal(API_CONTRACT.limitRequestsPerMinute,60);assert.equal(API_CONTRACT.concurrentListTimeCardsPerApiUser,1)});
+test('incomplete live GET-style response is blocked',()=>{const a=fx();delete a.authoritativeFullSnapshot.time_approver_id;delete a.authoritativeFullSnapshot.cost_allocation_selections;flag(assessCostCodeEdit(a),'source_time_approver_id_missing')});
+test('missing full source snapshot blocked',()=>flag(assessCostCodeEdit({authoritativeFullSnapshot:null,proposedReplacement:null}),'missing_full_snapshot_or_replacement'));
+test('dropped breaks denied',()=>{const a=fx();a.authoritativeFullSnapshot.breaks=[{start_dt_unix:t-500,end_dt_unix:t-300,duration_secs:200,is_paid:false}];flag(assessCostCodeEdit(a),'breaks_modified_in_code_only_edit')});
+test('changed start denied',()=>{const a=fx();a.proposedReplacement.start_dt_unix--;flag(assessCostCodeEdit(a),'time_modified_in_code_only_edit')});
+test('changed end denied',()=>{const a=fx();a.proposedReplacement.end_dt_unix--;flag(assessCostCodeEdit(a),'time_modified_in_code_only_edit')});
+test('changed approver denied',()=>{const a=fx();a.proposedReplacement.time_approver_id=19;flag(assessCostCodeEdit(a),'approver_modified_in_code_only_edit')});
+test('changed snapshot version denied',()=>{const a=fx();a.proposedReplacement.updated_at_unix--;flag(assessCostCodeEdit(a),'stale_snapshot_or_unpinned_version')});
+test('unknown PUT field denied',()=>{const a=fx();a.proposedReplacement.extra_field=true;flag(assessCostCodeEdit(a),'unknown_replacement_field')});
+test('missing reason denied',()=>{const a=fx();a.reason='';flag(assessCostCodeEdit(a),'reason_missing_or_too_short')});
+test('processed status held for explicit policy validation',()=>{const a=fx();a.authoritativeFullSnapshot.status='processed';flag(assessCostCodeEdit(a),'unverified_status_edit_policy')});
+test('not editable source denies candidate',()=>{const a=fx();a.authoritativeFullSnapshot.is_editable=false;flag(assessCostCodeEdit(a),'not_editable_at_source')});
+test('project deletion denied',()=>{const a=fx();a.proposedReplacement.cost_allocation_selections[0].selections[0].project_id=456;a.allowedCodesByProject['456']=[11];flag(assessCostCodeEdit(a),'project_allocations_changed_or_dropped')});
+test('unknown code denied',()=>{const a=fx();a.proposedReplacement.cost_allocation_selections[0].selections[0].cost_codes=[{cost_code_id:999,percent:1}];flag(assessCostCodeEdit(a),'replacement_invalid_or_unconfigured_code')});
+test('missing project catalog denied',()=>{const a=fx();a.allowedCodesByProject={};flag(assessCostCodeEdit(a),'replacement_project_catalog_missing')});
+test('cost-code weight sum denied',()=>{const a=fx();a.proposedReplacement.cost_allocation_selections[0].selections[0].cost_codes=[{cost_code_id:11,percent:0.5}];flag(assessCostCodeEdit(a),'replacement_cost_code_weights_not_one')});
+test('project percentages sum denied',()=>{const a=fx();a.proposedReplacement.cost_allocation_selections[0].selections[0].percent=0.5;flag(assessCostCodeEdit(a),'replacement_project_weights_not_one')});
+test('duplicate project selections denied',()=>{const a=fx();a.proposedReplacement.cost_allocation_selections[0].selections.push(structuredClone(a.proposedReplacement.cost_allocation_selections[0].selections[0]));flag(assessCostCodeEdit(a),'replacement_project_or_weight_invalid')});
+test('approved card cannot be approved again',()=>{const a=assessTimecardApproval({id:3,updated_at_unix:t,status:'approved',is_approvable:false});flag(a,'status_not_submitted')});
+test('submitted but not approvable held',()=>{const a=assessTimecardApproval({id:3,updated_at_unix:t,status:'submitted',is_approvable:false});flag(a,'source_not_approvable')});
+test('synthetic submitted card only generates non-executable descriptor',()=>{const a=assessTimecardApproval({id:3,updated_at_unix:t,status:'submitted',is_approvable:true});assert.equal(a.candidate,true);assert.equal(a.effectEnabled,false);assert.equal(a.requestTransport,'NONE')});
+test('missing updated timestamp denies approval',()=>{const a=assessTimecardApproval({id:3,status:'submitted',is_approvable:true});flag(a,'missing_id_or_version')});
+test('no HTTP call or authorization signer present',async()=>{const fs=await import('node:fs');const s=fs.readFileSync(new URL('./preflight.mjs',import.meta.url),'utf8');assert.doesNotMatch(s,/\bfetch\s*\(|https\.request\(|axios\.|Authorization:\s*Bearer|process\.env\./)});

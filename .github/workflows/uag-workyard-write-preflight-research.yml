@@ -1,0 +1,30 @@
+# Synthetic Workyard API contract research only. No tokens, network, or effects.
+name: UAG Workyard write safety preflight (offline)
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'research/workyard_write/**'
+      - '.github/workflows/uag-workyard-write-preflight-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safety-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test research/workyard_write/test_preflight.mjs
+      - name: No privileged executor exists in this research source
+        shell: bash
+        run: echo 'UAG_WORKYARD_WRITE_RESEARCH_ONLY_NO_EFFECTS'
