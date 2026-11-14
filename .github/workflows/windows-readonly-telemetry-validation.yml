@@ -1,0 +1,32 @@
+name: Windows read-only telemetry isolated native validation
+on:
+  push:
+    branches: [research/windows-readonly-telemetry-validation-20261114]
+    paths:
+      - 'research/windows-readonly-pilot/**'
+      - '.github/workflows/windows-readonly-telemetry-validation.yml'
+permissions:
+  contents: read
+jobs:
+  native-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check native Windows PowerShell 5.1 with no outbound telemetry
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Collector-Windows.ps1
+      - name: Check PowerShell 7 on disposable Windows runner
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -File research/windows-readonly-pilot/tests/Test-Collector-Windows.ps1
+  worker-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node.js and Python security tests only
+        run: |
+          node --test research/windows-readonly-pilot/tests/test_worker.mjs
+          python3 -m unittest discover -s research/windows-readonly-pilot/tests -p 'test_*.py'
