@@ -33,9 +33,31 @@ export async function acceptTelemetry(request,env,nowFn=()=>Date.now()){
   const declared=request.headers.get('content-length');
   if(declared!==null&&(!/^[0-9]+$/.test(declared)||Number(declared)>1200))return response(413,{error:'payload_too_large'});
   if((request.headers.get('content-type')||'').toLowerCase().split(';')[0].trim()!=='application/json')return response(415,{error:'unsupported_media_type'});
+  // Bound request-body consumption by BYTES, even when Content-Length is absent
+  // or untrusted. request.text() could buffer unlimited attacker-controlled input.
   let raw;
-  try{raw=await request.text();}catch{return response(400,{error:'invalid_request'});}
-  if(raw.length>1200)return response(413,{error:'payload_too_large'});
+  try {
+    const reader=request.body?.getReader();
+    if (!reader) return response(400,{error:'invalid_request'});
+    const chunks=[];
+    let byteCount=0;
+    try {
+      while(true) {
+        const part=await reader.read();
+        if(part.done)break;
+        byteCount += part.value.byteLength;
+        if(byteCount>1200) {
+          await reader.cancel().catch(()=>{});
+          return response(413,{error:'payload_too_large'});
+        }
+        chunks.push(part.value);
+      }
+    } finally {reader.releaseLock();}
+    const bytes=new Uint8Array(byteCount);
+    let offset=0;
+    for(const chunk of chunks) {bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    raw=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+  } catch {return response(400,{error:'invalid_request'});}
   let data;try{data=JSON.parse(raw);}catch{return response(400,{error:'invalid_request'});}
   const now=nowFn();
   if(!Number.isSafeInteger(now)||!validateBody(data,now))return response(422,{error:'invalid_reading'});
