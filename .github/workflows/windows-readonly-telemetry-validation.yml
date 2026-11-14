@@ -41,6 +41,14 @@ jobs:
         shell: pwsh
         run: |
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Collector-Overhead-Windows.ps1
+      - name: Validate optional local-only lag signals on disposable Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-LagSignals-LOCALONLY-Windows.ps1
+      - name: Validate optional local-only lag signals on disposable PowerShell 7
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -File research/windows-readonly-pilot/tests/Test-LagSignals-LOCALONLY-Windows.ps1
   worker-security:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
