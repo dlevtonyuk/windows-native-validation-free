@@ -1,10 +1,5 @@
 name: Windows read-only telemetry isolated native validation
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'research/windows-readonly-pilot/**'
-      - '.github/workflows/windows-readonly-telemetry-validation.yml'
   push:
     branches: [research/windows-readonly-telemetry-validation-20261114]
     paths:
@@ -12,6 +7,9 @@ on:
       - '.github/workflows/windows-readonly-telemetry-validation.yml'
 permissions:
   contents: read
+concurrency:
+  group: readonly-windows-validation-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   native-windows:
     runs-on: windows-2025
@@ -26,6 +24,10 @@ jobs:
         shell: pwsh
         run: |
           pwsh -NoProfile -NonInteractive -File research/windows-readonly-pilot/tests/Test-Collector-Windows.ps1
+      - name: Check DPAPI enrollment and sender fail-closed on disposable Windows only
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Enroll-Failclosed-Windows.ps1
   worker-security:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
