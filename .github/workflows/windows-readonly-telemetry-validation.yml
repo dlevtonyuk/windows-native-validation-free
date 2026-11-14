@@ -37,6 +37,10 @@ jobs:
         shell: pwsh
         run: |
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Sender-OfflineSim-Windows.ps1
+      - name: Measure disposable Windows aggregate collector overhead (3 x 300ms, no network)
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Collector-Overhead-Windows.ps1
   worker-security:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
