@@ -1,0 +1,40 @@
+# Research-only and non-deploying; no secrets, no Cloudflare tokens, no real business data.
+name: UAG durable multi-job Cron research
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'research/durable_dispatch/**'
+      - '.github/workflows/uag-durable-dispatch-workerd-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pure-gate-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --test research/durable_dispatch/test_worker.mjs
+  real-local-workerd-d1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install pinned local-only Cloudflare runtime
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Compile without any Cloudflare deployment
+        run: npx wrangler deploy --dry-run --config research/durable_dispatch/wrangler.lab.toml
+      - name: Test real workerd + persistent local D1 for multi-job Cron
+        shell: bash
+        run: bash research/durable_dispatch/workerd_acceptance.sh
