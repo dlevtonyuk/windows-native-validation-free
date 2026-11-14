@@ -6,7 +6,7 @@ const TOKEN = /^[a-zA-Z0-9_-]{43}$/;
 const KIND = 'aggregate_windows_readonly';
 const KEYS = ['commit_used_pct','cpu_used_pct','evidence_kind','observed_ms','process_count','ram_available_mb','ram_total_mb','ram_used_pct','sample_id','schema'];
 const HOUR = 3600000;
-export const RETENTION_CRON = '23 3 * * *';
+const RETENTION_CRON = '23 3 * * *';
 const response=(status,body,extra={}) => new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff',...extra}});
 const finitePercent=(n,nullable=false)=>nullable&&n===null||(typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=100);
 const whole=(n,lo,hi)=>Number.isSafeInteger(n)&&n>=lo&&n<=hi;
@@ -21,7 +21,7 @@ function validateBody(body,now){
 }
 async function sha256hex(token){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');}
 function same(a,b){if(typeof a!=='string'||typeof b!=='string'||a.length!==64||b.length!==64)return false;let d=0;for(let i=0;i<64;i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0;}
-export async function acceptTelemetry(request,env,nowFn=()=>Date.now()){
+async function acceptTelemetry(request,env,nowFn=()=>Date.now()){
   // This is inert without BOTH a user-enabled route and owner-enrolled device hash.
   const url=new URL(request.url);
   if(url.pathname!=='/v1/telemetry'||request.method!=='POST'||url.search!=='')return response(404,{error:'not_found'});
@@ -86,7 +86,7 @@ export async function acceptTelemetry(request,env,nowFn=()=>Date.now()){
     return response(202,{result:'accepted'});
   }catch{return response(503,{error:'temporarily_unavailable'});}
 }
-export async function purgeExpired(env,event,nowFn=()=>Date.now()){
+async function purgeExpired(env,event,nowFn=()=>Date.now()){
   if(event?.cron!==RETENTION_CRON)throw new Error('wrong_retention_cron');
   if(!env?.TELEMETRY_DB?.prepare)throw new Error('missing_d1_binding');
   const time=nowFn();if(!Number.isSafeInteger(time)||time<=7*24*HOUR)throw new Error('invalid_now');
