@@ -18,6 +18,9 @@ class StaticSafeguards(unittest.TestCase):
         self.assertIn('Invoke-WebRequest',s)
         self.assertNotIn('Invoke-Expression',s)
         self.assertNotIn('Register-ScheduledTask',s)
+        self.assertIn("$PinnedWorkerHostSha256=''",s)
+        self.assertIn('OWNER_PINNED_HOST_MISMATCH',s)
+        self.assertIn('OWNER_PINNED_WORKER_HOST_REQUIRED',s)
     def test_bootstrap_no_scheduler(self):
         s=(P/'windows'/'Prepare-LocalEnrollment-NOT-RUN.ps1').read_text()
         self.assertIn('ProtectedData',s)
