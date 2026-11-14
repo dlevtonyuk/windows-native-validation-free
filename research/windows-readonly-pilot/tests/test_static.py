@@ -43,6 +43,12 @@ class StaticSafeguards(unittest.TestCase):
         sql=(P/'cloud'/'schema.sql').read_text().lower()
         for forbidden in ['user_name', 'process_name','browser_history','command_line','filename','hostname']:
             self.assertNotIn(forbidden,sql)
+    def test_production_worker_exports_only_default_handler(self):
+        s=(P/'cloud'/'worker.mjs').read_text()
+        self.assertEqual(s.count('export default'),1)
+        self.assertNotRegex(s,r'\bexport\s+(?:const|function|async\s+function|class)\b')
+        self.assertIn('const RETENTION_CRON',s)
+
     def test_worker_has_no_enrollment_or_commands(self):
         code=(P/'cloud'/'worker.mjs').read_text()
         self.assertIn("'/v1/telemetry'",code)
