@@ -1,5 +1,10 @@
 name: Windows read-only telemetry isolated native validation
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'research/windows-readonly-pilot/**'
+      - '.github/workflows/windows-readonly-telemetry-validation.yml'
   push:
     branches: [research/windows-readonly-telemetry-validation-20261114]
     paths:
