@@ -48,7 +48,7 @@ class ReconciliationTests(unittest.TestCase):
         return compare(self.w if workyard is None else workyard,self.z if zoho is None else zoho,START,END,private_details=private_details)
     def _extra_row(self, *, allocation_id=899, card_id=17, updated=1400,
                    synced="2019-12-31 03:04:05", sec="900.00"):
-        return f"{card_id},{allocation_id},{sec},approved,1100,4,,{updated},{synced}\\r\\n"
+        return f"{card_id},{allocation_id},{sec},approved,1100,4,,{updated},{synced}\r\n"
 
     def test_proven_superseded_allocation_requires_review_but_current_matches(self):
         z = self.z + self._extra_row()
