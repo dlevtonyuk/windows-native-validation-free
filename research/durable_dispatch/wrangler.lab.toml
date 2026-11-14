@@ -1,6 +1,6 @@
 name = "uag-durable-dispatch-lab"
 main = "worker.mjs"
-compatibility_date = "2026-11-13"
+compatibility_date = "2026-11-11"
 workers_dev = false
 send_metrics = false
 
