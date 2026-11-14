@@ -1,0 +1,62 @@
+name: Windows read-only telemetry isolated native validation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'research/windows-readonly-pilot/**'
+      - '.github/workflows/windows-readonly-telemetry-validation.yml'
+  push:
+    branches: [research/windows-readonly-native-validation-final-20261114]
+    paths:
+      - 'research/windows-readonly-pilot/**'
+      - '.github/workflows/windows-readonly-telemetry-validation.yml'
+permissions:
+  contents: read
+concurrency:
+  group: readonly-windows-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check native Windows PowerShell 5.1 with no outbound telemetry
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Collector-Windows.ps1
+      - name: Check PowerShell 7 on disposable Windows runner
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -NonInteractive -File research/windows-readonly-pilot/tests/Test-Collector-Windows.ps1
+      - name: Check DPAPI enrollment and sender fail-closed on disposable Windows only
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Enroll-Failclosed-Windows.ps1
+      - name: Check offline-only Windows sender contract with temporary mocked transport
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Sender-OfflineSim-Windows.ps1
+      - name: Measure disposable Windows aggregate collector overhead (3 x 300ms, no network)
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Collector-Overhead-Windows.ps1
+  worker-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node.js and Python security tests only
+        run: |
+          node --test research/windows-readonly-pilot/tests/test_worker.mjs
+          python3 -m unittest discover -s research/windows-readonly-pilot/tests -p 'test_*.py'
+
+  worker-runtime-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated, secret-free Cloudflare Workers runtime
+        run: npm install --ignore-scripts --no-save --no-audit --no-fund miniflare@3
+      - name: Validate real workerd HTTP ingress and local D1, no remote access
+        run: node --test research/windows-readonly-pilot/tests/test_miniflare_runtime.mjs
