@@ -47,17 +47,18 @@ ticks,jobs,events=r
 assert len(ticks)==1,ticks
 assert ticks[0]['dispatch_type']=='synthetic_only'
 d={x['job_id']:x for x in jobs}
-assert len(d)==6,d
+assert len(d)==7,d
 assert d['readok']['state']=='succeeded' and d['readok']['attempts']==1,d['readok']
 assert d['recovered']['state']=='succeeded' and d['recovered']['attempts']==2,d['recovered']
 assert d['retryonce']['state']=='queued' and d['retryonce']['attempts']==1,d['retryonce']
 assert d['retryonce']['last_error']=='injected_retryable_read_failure',d['retryonce']
+assert d['exhausted']['state']=='deadletter' and d['exhausted']['attempts']==2,d['exhausted']
 for job_id in ('writeheld','deviceheld','connectorheld'):
  assert d[job_id]['state']=='queued' and d[job_id]['attempts']==0,d[job_id]
 for job_id in ('readok','recovered'):
  assert len(d[job_id]['result_sha256'])==64,d[job_id]
 counts={e['kind']:e['n'] for e in events}
-assert counts=={'claimed':3,'retry_queued':1,'succeeded':2},counts
+assert counts=={'claimed':5,'retry_queued':1,'succeeded':2,'lease_recovered':1,'deadletter':1},counts
 print('UAG_REAL_WORKERD_D1_DURABLE_MULTIJOB_LIFECYCLE_VERIFIED')
 print('UAG_EFFECT_LANES_REMAIN_DISABLED_3_OF_3')
 PY

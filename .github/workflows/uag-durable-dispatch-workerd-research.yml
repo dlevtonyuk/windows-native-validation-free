@@ -22,7 +22,10 @@ jobs:
         with: {persist-credentials: false}
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
       - run: node --test research/durable_dispatch/test_worker.mjs
+      - run: python -m unittest discover -s research/durable_dispatch -p 'test_atomic_transitions.py' -v
   real-local-workerd-d1:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS dispatch_jobs (
   completed_ms INTEGER,
   result_sha256 TEXT,
   last_error TEXT,
+  last_transition_ms INTEGER NOT NULL DEFAULT 0 CHECK(last_transition_ms >= 0),
   CHECK((state != 'running') OR lease_until_ms IS NOT NULL),
   CHECK((state != 'succeeded') OR (completed_ms IS NOT NULL AND result_sha256 IS NOT NULL))
 );
@@ -27,3 +28,26 @@ CREATE TABLE IF NOT EXISTS dispatch_events (
   stamp_ms INTEGER NOT NULL,
   attempt INTEGER NOT NULL CHECK(attempt >= 1)
 );
+-- Audit event is part of the SAME SQLite update transaction as job state.
+-- A failed audit event rejects and rolls back the state transition.
+CREATE TRIGGER IF NOT EXISTS dispatch_transition_audit
+AFTER UPDATE OF state ON dispatch_jobs
+WHEN OLD.state <> NEW.state
+BEGIN
+  SELECT CASE
+    WHEN NEW.last_transition_ms<=0 THEN RAISE(ABORT,'missing_transition_time')
+    WHEN OLD.state='queued' AND NEW.state='running' AND NEW.attempts=OLD.attempts+1 THEN 1
+    WHEN OLD.state='running' AND NEW.state='succeeded' THEN 1
+    WHEN OLD.state='running' AND NEW.state='deadletter' THEN 1
+    WHEN OLD.state='running' AND NEW.state='queued' THEN 1
+    ELSE RAISE(ABORT,'illegal_job_transition')
+  END;
+  INSERT INTO dispatch_events(job_id,kind,stamp_ms,attempt)
+  VALUES(NEW.job_id, CASE
+    WHEN NEW.state='running' THEN 'claimed'
+    WHEN NEW.state='succeeded' THEN 'succeeded'
+    WHEN NEW.state='deadletter' THEN 'deadletter'
+    WHEN NEW.state='queued' AND NEW.last_error='expired_mock_lease' THEN 'lease_recovered'
+    ELSE 'retry_queued'
+  END,NEW.last_transition_ms,NEW.attempts);
+END;

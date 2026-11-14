@@ -34,20 +34,15 @@ async function runSql(env,sql,...args){
   must(x?.success===true,'d1_write_unconfirmed');
   return x;
 }
-async function logEvent(env,job,kind,time){
-  await runSql(env,'INSERT INTO dispatch_events(job_id,kind,stamp_ms,attempt) VALUES (?,?,?,?)',job.job_id,kind,time,job.attempts);
-}
 async function completeJob(env,job,now,digest){
-  const z=await runSql(env,"UPDATE dispatch_jobs SET state='succeeded',completed_ms=?,result_sha256=?,lease_until_ms=NULL,last_error=NULL WHERE job_id=? AND state='running' AND attempts=?",now,digest,job.job_id,job.attempts);
+  const z=await runSql(env,"UPDATE dispatch_jobs SET state='succeeded',completed_ms=?,result_sha256=?,lease_until_ms=NULL,last_error=NULL,last_transition_ms=? WHERE job_id=? AND state='running' AND attempts=?",now,digest,now,job.job_id,job.attempts);
   must(z?.meta?.changes===1,'completion_cas_failed');
-  await logEvent(env,job,'succeeded',now);
 }
 async function failJob(env,job,now,error){
   const terminal=job.attempts>=job.max_attempts,kind=terminal?'deadletter':'retry_queued';
   const msg=String(error?.message||'read_failure').slice(0,80);
-  const z=await runSql(env,"UPDATE dispatch_jobs SET state=?,due_ms=?,lease_until_ms=NULL,last_error=? WHERE job_id=? AND state='running' AND attempts=?",terminal?'deadletter':'queued',terminal?now:now+RETRY,msg,job.job_id,job.attempts);
+  const z=await runSql(env,"UPDATE dispatch_jobs SET state=?,due_ms=?,lease_until_ms=NULL,last_error=?,last_transition_ms=? WHERE job_id=? AND state='running' AND attempts=?",terminal?'deadletter':'queued',terminal?now:now+RETRY,msg,now,job.job_id,job.attempts);
   must(z?.meta?.changes===1,'failure_cas_failed');
-  await logEvent(env,job,kind,now);
 }
 export async function dispatchTick(controller,env,now=Date.now()){
   const slot=validateController(controller,now);
@@ -57,13 +52,12 @@ export async function dispatchTick(controller,env,now=Date.now()){
   if(ins.meta?.changes!==1)return {slot,duplicate:true,executed:0};
   // Only safe synthetic read jobs may be reclaimed after an expired claim.
   // Owner effects and connector jobs have no executable path here.
-  await runSql(env,"UPDATE dispatch_jobs SET state='queued',lease_until_ms=NULL,last_error='expired_mock_lease' WHERE route='cloud_readonly_mock' AND state='running' AND lease_until_ms<=?",now);
-  const claimed=await env.DB.prepare("UPDATE dispatch_jobs SET state='running',attempts=attempts+1,lease_until_ms=? WHERE job_id IN (SELECT job_id FROM dispatch_jobs WHERE route='cloud_readonly_mock' AND state='queued' AND due_ms<=? AND attempts<max_attempts ORDER BY due_ms,job_id LIMIT ?) RETURNING job_id,route,operation,attempts,max_attempts").bind(now+LEASE,now,MAX_BATCH).all();
+  await runSql(env,"UPDATE dispatch_jobs SET state=CASE WHEN attempts>=max_attempts THEN 'deadletter' ELSE 'queued' END,lease_until_ms=NULL,last_error=CASE WHEN attempts>=max_attempts THEN 'expired_mock_lease_attempts_exhausted' ELSE 'expired_mock_lease' END,last_transition_ms=? WHERE route='cloud_readonly_mock' AND state='running' AND lease_until_ms<=?",now,now);
+  const claimed=await env.DB.prepare("UPDATE dispatch_jobs SET state='running',attempts=attempts+1,lease_until_ms=?,last_transition_ms=? WHERE job_id IN (SELECT job_id FROM dispatch_jobs WHERE route='cloud_readonly_mock' AND state='queued' AND due_ms<=? AND attempts<max_attempts ORDER BY due_ms,job_id LIMIT ?) RETURNING job_id,route,operation,attempts,max_attempts").bind(now+LEASE,now,now,MAX_BATCH).all();
   must(claimed?.success===true&&Array.isArray(claimed.results),'d1_claim_failed');
   let succeeded=0,requeued=0,deadletter=0;
   for(const job of claimed.results){
     must(acceptableReadJob(job),'claimed_untrusted_job');
-    await logEvent(env,job,'claimed',now);
     try{
       const result=await syntheticReadAdapter(job);
       const bytes=new TextEncoder().encode(JSON.stringify(result));

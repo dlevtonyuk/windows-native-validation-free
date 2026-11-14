@@ -24,3 +24,9 @@ This advances the Gateway beyond one row per hour: a **single native Cron** coor
 `node --test research/durable_dispatch/test_worker.mjs` and `bash research/durable_dispatch/workerd_acceptance.sh` on a disposable Ubuntu GitHub runner. Native Windows and Linux run unit tests. The local test asserts 1 Cron receipt, 2 successful tasks, 1 delayed retry, 3 blocked routes, 0 duplicated effects, 0 exposed operational HTTP endpoints and correct real SQLite D1 persistence; it explicitly does **not** claim business-system connectivity.
 
 Future productive path: cloud scheduler + D1 persistent state, ChatGPT connector lane running only in actual unattended ChatGPT tasks until a separately provisioned protected broker exists; then owner-approved read-only SaaS adapter and finally individually scoped privileged-effects adapters. No recurring user prompts for routine authorized reads; no unjustified capability activation.
+
+## Additive 2026-11-14 atomic audit hardening (research)
+- Job transitions and their audit records now share one SQLite atomic UPDATE/AFTER UPDATE trigger; a failing event insert rolls back the state change.
+- Claims recovered from expired leases create recovery events. Expired final attempts go to durable deadletter instead of staying indefinitely queued.
+- The fixture now has seven synthetic jobs, including an exhausted-lease failure. Real workerd+D1 and native SQLite tests verify these state transitions without accessing any external system.
+- This strengthens crash consistency but does NOT prove owner tamper-proof auditing, remote recovery, provider billing, or live business operations.
