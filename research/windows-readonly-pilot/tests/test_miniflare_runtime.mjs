@@ -35,7 +35,10 @@ test('workerd local D1: HTTP ingress, auth, idempotency, atomic throttle, retent
   });
   try {
     const db=await mf.getD1Database('TELEMETRY_DB');
-    await db.exec(SCHEMA);
+    // D1.exec() treats comment-only lines as separate fragments; remove SQL
+    // comments in this disposable test setup without touching production DDL.
+    const cleanSchema=SCHEMA.split('\n').filter(line=>!line.trimStart().startsWith('--')).join('\n');
+    await db.exec(cleanSchema);
     const before=await db.prepare('SELECT COUNT(*) AS n FROM device_registry').first();
     assert.equal(before.n,0,'initial identity registry must be empty');
     const denied=await mf.dispatchFetch(sendUrl,request(createSample('123e4567-e89b-42d3-a456-426614174011')));
