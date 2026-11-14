@@ -68,3 +68,38 @@ test('concurrent distinct samples cannot bypass the atomic minimum interval',asy
   assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM telemetry_readings').get().n,1);
   a.db.close();
 });
+
+// In production a requester can omit Content-Length. Refuse large bodies before
+// decoding/concatenating; never allocate a whole untrusted body with request.text().
+test('large body without Content-Length is rejected with bounded streaming',async()=>{
+ const a=setup();a.insertDevice();
+ let canceled=false;
+ const bodyStream=new ReadableStream({
+  start(controller){controller.enqueue(new TextEncoder().encode('x'.repeat(1800)));},
+  cancel(){canceled=true;}
+ });
+ const r=await acceptTelemetry(new Request('https://example.test/v1/telemetry',{
+  method:'POST',duplex:'half',headers:{Authorization:'Bearer '+token,'X-Device-Id':device,'Content-Type':'application/json'},body:bodyStream
+ }),a.env,()=>base);
+ assert.equal(r.status,413);
+ assert.equal(canceled,true);
+ assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM telemetry_readings').get().n,0);
+ a.db.close();
+});
+test('multibyte UTF-8 input is bounded by bytes rather than character count',async()=>{
+ const a=setup();a.insertDevice();
+ const payload='{"extra":"'+ 'é'.repeat(700)+'"}';
+ const r=await submit(a.env,payload);
+ assert.equal(r.status,413);
+ a.db.close();
+});
+test('invalid UTF-8 is rejected, no database writes',async()=>{
+ const a=setup();a.insertDevice();
+ const bodyStream=new ReadableStream({start(controller){controller.enqueue(Uint8Array.from([0xff,0xfe]));controller.close();}});
+ const r=await acceptTelemetry(new Request('https://example.test/v1/telemetry',{
+  method:'POST',duplex:'half',headers:{Authorization:'Bearer '+token,'X-Device-Id':device,'Content-Type':'application/json'},body:bodyStream
+ }),a.env,()=>base);
+ assert.equal(r.status,400);
+ assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM telemetry_readings').get().n,0);
+ a.db.close();
+});
