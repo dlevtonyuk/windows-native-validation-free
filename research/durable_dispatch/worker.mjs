@@ -35,14 +35,15 @@ async function runSql(env,sql,...args){
   return x;
 }
 async function completeJob(env,job,now,digest){
-  const z=await runSql(env,"UPDATE dispatch_jobs SET state='succeeded',completed_ms=?,result_sha256=?,lease_until_ms=NULL,last_error=NULL,last_transition_ms=? WHERE job_id=? AND state='running' AND attempts=?",now,digest,now,job.job_id,job.attempts);
-  must(z?.meta?.changes===1,'completion_cas_failed');
+  const z=await env.DB.prepare("UPDATE dispatch_jobs SET state='succeeded',completed_ms=?,result_sha256=?,lease_until_ms=NULL,last_error=NULL,last_transition_ms=? WHERE job_id=? AND state='running' AND attempts=? RETURNING job_id").bind(now,digest,now,job.job_id,job.attempts).all();
+  // D1's meta.changes may count auditing triggers. Inspect the RETURNING CAS row.
+  must(z?.success===true&&z?.results?.length===1&&z.results[0].job_id===job.job_id,'completion_cas_failed');
 }
 async function failJob(env,job,now,error){
   const terminal=job.attempts>=job.max_attempts,kind=terminal?'deadletter':'retry_queued';
   const msg=String(error?.message||'read_failure').slice(0,80);
-  const z=await runSql(env,"UPDATE dispatch_jobs SET state=?,due_ms=?,lease_until_ms=NULL,last_error=?,last_transition_ms=? WHERE job_id=? AND state='running' AND attempts=?",terminal?'deadletter':'queued',terminal?now:now+RETRY,msg,now,job.job_id,job.attempts);
-  must(z?.meta?.changes===1,'failure_cas_failed');
+  const z=await env.DB.prepare("UPDATE dispatch_jobs SET state=?,due_ms=?,lease_until_ms=NULL,last_error=?,last_transition_ms=? WHERE job_id=? AND state='running' AND attempts=? RETURNING job_id").bind(terminal?'deadletter':'queued',terminal?now:now+RETRY,msg,now,job.job_id,job.attempts).all();
+  must(z?.success===true&&z?.results?.length===1&&z.results[0].job_id===job.job_id,'failure_cas_failed');
 }
 export async function dispatchTick(controller,env,now=Date.now()){
   const slot=validateController(controller,now);
@@ -58,12 +59,18 @@ export async function dispatchTick(controller,env,now=Date.now()){
   let succeeded=0,requeued=0,deadletter=0;
   for(const job of claimed.results){
     must(acceptableReadJob(job),'claimed_untrusted_job');
-    try{
-      const result=await syntheticReadAdapter(job);
-      const bytes=new TextEncoder().encode(JSON.stringify(result));
-      const sha=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
-      await completeJob(env,job,now,sha);succeeded++;
-    }catch(e){await failJob(env,job,now,e);if(job.attempts>=job.max_attempts)deadletter++;else requeued++;}
+    let result;
+    try{result=await syntheticReadAdapter(job);}
+    catch(e){
+      await failJob(env,job,now,e);
+      if(job.attempts>=job.max_attempts)deadletter++;else requeued++;
+      continue;
+    }
+    const bytes=new TextEncoder().encode(JSON.stringify(result));
+    const sha=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
+    // Do NOT treat an ambiguous completion write as handler failure.
+    // Leave the claim for lease reconciliation instead of attempting two outcomes.
+    await completeJob(env,job,now,sha);succeeded++;
   }
   return {slot,duplicate:false,executed:claimed.results.length,succeeded,requeued,deadletter,non_executable_lanes:'held'};
 }
