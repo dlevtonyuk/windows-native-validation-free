@@ -6,7 +6,7 @@ on:
       - 'research/windows-readonly-pilot/**'
       - '.github/workflows/windows-readonly-telemetry-validation.yml'
   push:
-    branches: [research/windows-readonly-telemetry-validation-20261114]
+    branches: [research/windows-readonly-native-validation-final-20261114]
     paths:
       - 'research/windows-readonly-pilot/**'
       - '.github/workflows/windows-readonly-telemetry-validation.yml'
@@ -33,6 +33,10 @@ jobs:
         shell: pwsh
         run: |
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Enroll-Failclosed-Windows.ps1
+      - name: Check offline-only Windows sender contract with temporary mocked transport
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File research/windows-readonly-pilot/tests/Test-Sender-OfflineSim-Windows.ps1
   worker-security:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
