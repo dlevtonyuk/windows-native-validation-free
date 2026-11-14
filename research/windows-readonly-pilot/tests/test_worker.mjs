@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {acceptTelemetry,purgeExpired,RETENTION_CRON} from '../cloud/worker.mjs';
+import handler,{acceptTelemetry,purgeExpired,RETENTION_CRON} from '../cloud/worker.mjs';
 const schema=readFileSync(new URL('../cloud/schema.sql',import.meta.url),'utf8');
 const device='a'.repeat(32),token='A'.repeat(43),hash=createHash('sha256').update(token).digest('hex');
 const base=Date.parse('2026-11-14T13:00:00Z'),uuid='123e4567-e89b-42d3-a456-426614174000';
@@ -48,3 +48,23 @@ test('invalid GUID version rejected',async()=>{let a=setup();a.insertDevice();co
 test('wrong retention cron does not delete',async()=>{let a=setup();a.insertDevice();await submit(a.env,body());await assert.rejects(purgeExpired(a.env,{cron:'0 * * * *'},()=>base+9*86400000),/wrong_retention_cron/);assert.equal(a.db.prepare('SELECT count(*) as n FROM telemetry_readings').get().n,1);a.db.close()});
 test('retention actually deletes old and preserves fresh',async()=>{let a=setup();a.insertDevice();await submit(a.env,body());let t=base+8*86400000;await a.env.TELEMETRY_DB.prepare('INSERT INTO telemetry_readings (device_id,sample_id,observed_ms,received_ms,evidence_kind,cpu_used_pct,ram_used_pct,ram_total_mb,ram_available_mb,commit_used_pct,process_count) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(device,'123e4567-e89b-42d3-a456-426614174002',t,t,'aggregate_windows_readonly',12.5,75,16384,4096,62.1,160).run();const outcome=await purgeExpired(a.env,{cron:RETENTION_CRON},()=>t);assert.equal(outcome.removed,1);assert.equal(a.db.prepare('SELECT count(*) as n FROM telemetry_readings').get().n,1);a.db.close()});
 test('retention disabled before activation, no job URL',()=>{assert.equal(RETENTION_CRON,'23 3 * * *')});
+
+// Cloudflare runtime invokes exported fetch(request, env, executionContext), not
+// acceptTelemetry(request, env, injectedClock). Regression for a live-only defect.
+test('default export fetch receives Cloudflare ExecutionContext without treating it as a clock',async()=>{
+  const a=setup();a.insertDevice();const id='123e4567-e89b-42d3-a456-426614174005';
+  const current=Date.now();
+  const r=await handler.fetch(req(body({sample_id:id,observed_ms:current})),a.env,{waitUntil(){}});
+  assert.equal(r.status,202);
+  assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM telemetry_readings').get().n,1);
+  a.db.close();
+});
+test('concurrent distinct samples cannot bypass the atomic minimum interval',async()=>{
+  const a=setup();a.insertDevice();
+  const first=body({sample_id:'123e4567-e89b-42d3-a456-426614174006'});
+  const second=body({sample_id:'123e4567-e89b-42d3-a456-426614174007'});
+  const results=await Promise.all([submit(a.env,first,{},base),submit(a.env,second,{},base)]);
+  assert.deepEqual(results.map(r=>r.status).sort(),[202,429]);
+  assert.equal(a.db.prepare('SELECT COUNT(*) AS n FROM telemetry_readings').get().n,1);
+  a.db.close();
+});
