@@ -46,6 +46,83 @@ class ReconciliationTests(unittest.TestCase):
         self.w=fixture();self.z=csv_of(self.w)
     def check(self,workyard=None,zoho=None,private_details=False):
         return compare(self.w if workyard is None else workyard,self.z if zoho is None else zoho,START,END,private_details=private_details)
+    def _extra_row(self, *, allocation_id=899, card_id=17, updated=1400,
+                   synced="2019-12-31 03:04:05", sec="900.00"):
+        return f"{card_id},{allocation_id},{sec},approved,1100,4,,{updated},{synced}\\r\\n"
+
+    def test_proven_superseded_allocation_requires_review_but_current_matches(self):
+        z = self.z + self._extra_row()
+        x = self.check(zoho=z)
+        self.assertFalse(x["exact_match"])
+        self.assertTrue(x["current_snapshot_match"])
+        self.assertEqual(x["historical_zoho_allocations"],1)
+        self.assertEqual(x["unexplained_zoho_allocations"],0)
+        self.assertEqual(x["historical_zoho_hours"],0.25)
+        self.assertEqual(x["raw_zoho_hours"],2.75)
+        self.assertEqual(x["current_equivalent_zoho_hours"],2.5)
+        self.assertTrue(x["review_required"])
+        self.assertNotIn("899",json.dumps(x))
+
+    def test_unknown_card_extra_never_silently_discarded(self):
+        z=self.z+self._extra_row(card_id=99)
+        x=self.check(zoho=z)
+        self.assertFalse(x["current_snapshot_match"])
+        self.assertEqual(x["historical_zoho_allocations"],0)
+        self.assertEqual(x["unexplained_zoho_allocations"],1)
+
+    def test_same_update_revision_cannot_be_called_prior_history(self):
+        z=self.z+self._extra_row(updated=1500)
+        x=self.check(zoho=z)
+        self.assertFalse(x["current_snapshot_match"])
+        self.assertEqual(x["unexplained_zoho_allocations"],1)
+
+    def test_newer_or_equal_sync_not_historical(self):
+        z=self.z+self._extra_row(synced="2020-01-02 03:04:05")
+        x=self.check(zoho=z)
+        self.assertFalse(x["current_snapshot_match"])
+        self.assertEqual(x["unexplained_zoho_allocations"],1)
+
+    def test_invalid_old_sync_cannot_prove_history(self):
+        z=self.z+self._extra_row(synced="unknown-time")
+        x=self.check(zoho=z)
+        self.assertFalse(x["current_snapshot_match"])
+        self.assertEqual(x["unexplained_zoho_allocations"],1)
+
+    def test_current_card_must_be_fully_matched_before_excluding_history(self):
+        z=self.z+self._extra_row()
+        current=self.z.splitlines(keepends=True)[1]
+        z=z.replace(current,"",1)
+        x=self.check(zoho=z)
+        self.assertFalse(x["current_snapshot_match"])
+        self.assertEqual(x["missing_in_zoho"],1)
+        self.assertEqual(x["unexplained_zoho_allocations"],1)
+
+    def test_multiple_proven_prior_rows_are_individually_counted(self):
+        z=self.z+self._extra_row(allocation_id=899)+self._extra_row(allocation_id=900,sec="300.00")
+        x=self.check(zoho=z)
+        self.assertTrue(x["current_snapshot_match"])
+        self.assertFalse(x["exact_match"])
+        self.assertEqual(x["historical_zoho_allocations"],2)
+        self.assertEqual(x["historical_zoho_hours"],round(1200/3600,6))
+
+    def test_synced_order_only_never_assumes_utc(self):
+        x=self.check(zoho=self.z+self._extra_row())
+        self.assertIn("Zoho synced_at lacks timezone",x["caveats"])
+        self.assertNotIn("timezone",json.dumps(x["private_exception_ids"]) if "private_exception_ids" in x else "")
+
+    def test_current_decimal_seconds_format_is_numeric_not_string(self):
+        z=self.z.replace(",3600,",",3600.00,",1)
+        x=self.check(zoho=z)
+        self.assertTrue(x["exact_match"])
+        self.assertTrue(x["current_snapshot_match"])
+        self.assertEqual(x["historical_zoho_allocations"],0)
+
+    def test_private_historical_ids_are_opt_in(self):
+        z=self.z+self._extra_row()
+        x=self.check(zoho=z,private_details=True)
+        self.assertEqual(x["private_exception_ids"]["historical_zoho_allocation_ids"],["899"])
+        self.assertEqual(x["private_exception_ids"]["unexplained_zoho_allocation_ids"],[])
+
     def test_valid_complete_exact(self):
         x=self.check();self.assertTrue(x['complete']);self.assertTrue(x['exact_match']);self.assertEqual(x['card_count'],2);self.assertEqual(x['statuses'],dict(approved=1,processed=1,submitted=0,working=0));self.assertEqual(x['direct_allocations'],2)
     def test_aggregate_default_no_employee_or_record_ids(self):

@@ -21,3 +21,11 @@ Exit 0: input coverage is complete and all compared allocations equal; exit 1: c
 ## Hosted tests and security
 
 The CI workflow below checks fictional fixtures only on GitHub-hosted Windows and Ubuntu, without environment credentials or deployment. `permissions: contents: read`; no Cloudflare or Workyard tokens, no network calls from the test program. This research is compatible with the user's existing non-deployment GitHub research branch. Production credentials and real data stay outside GitHub Actions.
+
+## November 14 verified historical-snapshot regression (research only)
+
+A second real read-only period showed Zoho can retain historical allocation rows after Workyard changes a timecard. The checker now distinguishes **raw exact** reconciliation from **current snapshot equivalent** reconciliation. It only classifies an extra Zoho allocation as proven historical when: (1) the card still exists in Workyard, (2) EVERY current allocation of that card independently matches Zoho on all eight source fields, (3) the historical row has a strictly **older** Workyard updated-at time, and (4) the historical row has a strictly earlier Zoho synchronization timestamp than a matching current row for that card. It compares two unzoned sync timestamps only for ordering; it never invents a timezone. All other extras remain unexplained and block acceptance. A row with an identical or newer source revision is NOT safely discardable.
+
+The added fields are `current_snapshot_match`, `historical_zoho_allocations`, `historical_zoho_hours`, `unexplained_zoho_allocations`, `raw_zoho_hours`, `current_equivalent_zoho_hours`, and `review_required`. The longstanding `exact_match` still means **exact raw row correspondence** and remains false if any historical rows exist. CLI returns a nonzero exit code when raw data differ, even if current-equivalent reconciliation succeeds; this ensures actionable exceptions cannot be silently ignored.
+
+The test fixtures contain NO user, company, employee, real allocation IDs, organization settings or credentials. A real report still needs authenticated live data, coverage, historical-event classification and scheduled unattended completion; offline tests alone cannot establish those.

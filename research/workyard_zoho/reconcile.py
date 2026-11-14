@@ -149,6 +149,59 @@ def _snapshot(source, start, end):
     return rows, counts, dict(card_sums), kinds, candidates, len(seen_cards)
 
 
+def _unzoned_sync(stamp):
+    """Compare recorded sync ordering only; never assign a timezone."""
+    try:
+        return datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
+def _classify_historical_extra(direct, other, sync_by_allocation, discrepancies):
+    """Only mark extras as superseded when matched current card history proves it.
+
+    An extra Zoho row is NOT a duplicate just because it has an old sync time.
+    We must find the current card in the authoritative direct Workyard snapshot,
+    independently match every one of that card's current allocation rows, and
+    require both a prior source update AND an earlier Zoho sync for the extra.
+    Any ambiguity remains unexplained and blocks current-equivalent acceptance.
+    """
+    mismatched_ids = {aid for aid, _ in discrepancies}
+    current_matches = (set(direct) & set(other)) - mismatched_ids
+    current_by_card, matched_by_card, current_sync_by_card = {}, {}, {}
+    for aid, row in direct.items():
+        cid = row["time_card_id"]
+        stamp = row["time_card_updated_at_unix"]
+        if cid in current_by_card and current_by_card[cid]["updated"] != stamp:
+            raise IncompleteEvidence("inconsistent updated_at across direct allocations")
+        if cid not in current_by_card:
+            current_by_card[cid] = {"updated":stamp, "allocations":set()}
+        current_by_card[cid]["allocations"].add(aid)
+        if aid in current_matches:
+            matched_by_card.setdefault(cid,set()).add(aid)
+            sync = _unzoned_sync(sync_by_allocation[aid])
+            if sync is not None:
+                prev = current_sync_by_card.get(cid)
+                current_sync_by_card[cid] = max(sync, prev) if prev else sync
+    historical, unexplained = [], []
+    for aid in sorted(set(other)-set(direct)):
+        row = other[aid]
+        cid = row["time_card_id"]
+        now = current_by_card.get(cid)
+        earlier = _unzoned_sync(sync_by_allocation[aid])
+        current_sync = current_sync_by_card.get(cid)
+        is_proven_prior = (
+            now is not None
+            and matched_by_card.get(cid,set()) == now["allocations"]
+            and bool(now["allocations"])
+            and row["time_card_updated_at_unix"] < now["updated"]
+            and earlier is not None and current_sync is not None
+            and earlier < current_sync
+        )
+        (historical if is_proven_prior else unexplained).append(aid)
+    return historical, unexplained
+
+
 def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=False):
     """Compare complete source snapshots; no network or writes.
 
@@ -165,6 +218,7 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
         raise IncompleteEvidence("missing Zoho export columns")
     other = {}
     syncs = set()
+    sync_by_allocation = {}
     for x in csv_rows:
         if None in x:
             raise IncompleteEvidence("malformed csv extra columns")
@@ -176,6 +230,7 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
         stamp = _key(x.get("synced_at"), "zoho synced_at")
         # Zoho does not provide timezone here, so no UTC freshness assertion.
         syncs.add(stamp)
+        sync_by_allocation[a_id] = stamp
         t = _integer(x["time_card_start_dt_unix"], "Zoho start")
         if not start <= t < end:
             raise IncompleteEvidence("Zoho export outside period")
@@ -198,9 +253,22 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
                 discrepancies.append((aid,field))
     discrepancies.sort()
     exact = not unmatched_direct and not unmatched_zoho and not discrepancies
+    historical, unexplained = _classify_historical_extra(
+        direct, other, sync_by_allocation, discrepancies)
+    current_equivalent = not unmatched_direct and not unexplained and not discrepancies
+    raw_zoho_seconds = sum(v["allocated_secs"] for v in other.values())
+    historical_seconds = sum(other[aid]["allocated_secs"] for aid in historical)
     # Do not count a test passing as evidence that all source statuses exist.
     result = {
         "complete":True, "exact_match":exact,
+        # This supplementary result never conceals historical rows in raw Zoho.
+        "current_snapshot_match":current_equivalent,
+        "historical_zoho_allocations":len(historical),
+        "historical_zoho_hours":round(historical_seconds/3600,6),
+        "unexplained_zoho_allocations":len(unexplained),
+        "raw_zoho_hours":round(raw_zoho_seconds/3600,6),
+        "current_equivalent_zoho_hours":round((raw_zoho_seconds-historical_seconds)/3600,6) if current_equivalent else None,
+        "review_required":bool(historical) or not current_equivalent,
         "period_unix":{"start":start,"end_exclusive":end},
         "card_count":cards,"statuses":by_status,
         "hours_total":round(sum(card_times.values())/3600,6),
@@ -213,11 +281,12 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
         "code_review_candidates":len(candidates),
         "candidate_hours":round(sum(c["duration_secs"] for c in candidates)/3600,6),
         "sync_timestamps_unzoned":sorted(syncs),
-        "caveats":["Cross-API reads are not atomic", "Zoho synced_at lacks timezone", "Code omission is a review candidate, not a verified policy violation"],
+        "caveats":["Cross-API reads are not atomic", "Zoho synced_at lacks timezone", "Code omission is a review candidate, not a verified policy violation", "Historical Zoho snapshots can inflate raw sums; classify only with a newer matching Workyard card version"],
     }
     if private_details:
         result["private_exception_ids"]={
             "missing_in_zoho":unmatched_direct,"missing_in_workyard":unmatched_zoho,
+            "historical_zoho_allocation_ids":historical,"unexplained_zoho_allocation_ids":unexplained,
             "field_mismatches":discrepancies,"cost_codes":candidates,
         }
     return result
