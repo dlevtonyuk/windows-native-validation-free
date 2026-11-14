@@ -16,6 +16,17 @@ if($config.schema -ne 1 -or $config.device_id -cnotmatch '^[a-f0-9]{32}$' -or $c
 $uri=$null
 try {$uri=[Uri]$config.endpoint}catch{throw 'OWNER_ENDPOINT_NOT_ACTIVATED'}
 if($uri.Scheme -cne 'https' -or $uri.Host -cnotmatch '^cwfr-windows-telemetry-staging\.[a-z0-9-]+\.workers\.dev$' -or $uri.AbsolutePath -cne '/v1/telemetry' -or $uri.Query -ne '' -or $uri.Fragment -ne '' -or $uri.UserInfo -ne '' -or $uri.Port -ne 443){throw 'ENDPOINT_OUT_OF_SCOPE'}
+
+# Deployment-specific owner pin. Intentionally INERT in all distributed and public research code.
+# Only owner-approved enrollment may replace the empty value with the SHA-256 of the
+# exact, separately verified Cloudflare Worker DNS hostname (lowercase ASCII).
+# The pin lives in the audited sender source, never in editable config.json.
+$PinnedWorkerHostSha256=''
+if($PinnedWorkerHostSha256 -cnotmatch '^[0-9a-f]{64}$'){throw 'OWNER_PINNED_WORKER_HOST_REQUIRED'}
+$hasher=[Security.Cryptography.SHA256]::Create()
+try { $hostDigest=([BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($uri.DnsSafeHost.ToLowerInvariant())))).Replace('-','').ToLowerInvariant() }
+finally { $hasher.Dispose() }
+if($hostDigest -cne $PinnedWorkerHostSha256){throw 'OWNER_PINNED_HOST_MISMATCH'}
 Add-Type -AssemblyName System.Security
 $encrypted=[IO.File]::ReadAllBytes($secretPath)
 $plaintext=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
