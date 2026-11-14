@@ -34,8 +34,8 @@ try {
     $src=[IO.File]::ReadAllText($sender)
     $blankPin='$PinnedWorkerHostSha256=' + "''"
     $pinned='$PinnedWorkerHostSha256=' + "'"+$pin+"'"
-    if($src.Split($blankPin).Count -ne 2){throw 'ORIGINAL_SENDER_PIN_NOT_BLANK'}
-    if($src.Split('Invoke-WebRequest -Uri').Count -ne 2){throw 'ORIGINAL_SENDER_TRANSPORT_UNEXPECTED'}
+    if(-not $src.Contains($blankPin) -or $src.IndexOf($blankPin) -ne $src.LastIndexOf($blankPin)){throw 'ORIGINAL_SENDER_PIN_NOT_BLANK'}
+    if(-not $src.Contains('Invoke-WebRequest -Uri') -or $src.IndexOf('Invoke-WebRequest -Uri') -ne $src.LastIndexOf('Invoke-WebRequest -Uri')){throw 'ORIGINAL_SENDER_TRANSPORT_UNEXPECTED'}
     # The temporary copy substitutes the transport symbol, not its real implementation.
     # If our mock is absent, the test fails closed: it has no Invoke-WebRequest call.
     $safeSource=$src.Replace($blankPin,$pinned).Replace('Invoke-WebRequest -Uri','Invoke-CWFRMockedWebRequest -Uri')
