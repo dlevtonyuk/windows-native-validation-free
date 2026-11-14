@@ -1,0 +1,34 @@
+name: UAG Workyard Zoho reconciliation fail-closed research
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'research/workyard_zoho/**'
+      - '.github/workflows/uag-workyard-zoho-offline-reconciliation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-reconciliation:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Synthetic only - test strict source coverage and data equality
+        run: python -m unittest discover -s research/workyard_zoho -p 'test_*.py' -v
+      - name: Confirm no Cloudflare deployment or business credentials used
+        shell: bash
+        run: |
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${WORKYARD_API_TOKEN:-}"
+          test -z "${ZOHO_ACCESS_TOKEN:-}"
+          echo 'UAG_WORKYARD_ZOHO_OFFLINE_RESEARCH_ONLY'
