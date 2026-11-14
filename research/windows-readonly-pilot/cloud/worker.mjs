@@ -46,11 +46,22 @@ export async function acceptTelemetry(request,env,nowFn=()=>Date.now()){
     if(dupe)return response(200,{result:'duplicate_ignored'});
     const recent=await env.TELEMETRY_DB.prepare('SELECT MAX(received_ms) AS latest FROM telemetry_readings WHERE device_id=?').bind(device).first();
     if(recent?.latest!==null&&recent?.latest!==undefined&&now-recent.latest<45000)return response(429,{error:'too_frequent'},{'retry-after':'60'});
+    // The minimum interval must be enforced by the same atomic SQLite statement
+    // as the insert. A SELECT followed by a normal INSERT can race when two
+    // simultaneous requests arrive, even if the earlier preflight check passes.
     const result=await env.TELEMETRY_DB.prepare(
-      'INSERT INTO telemetry_readings (device_id,sample_id,observed_ms,received_ms,evidence_kind,cpu_used_pct,ram_used_pct,ram_total_mb,ram_available_mb,commit_used_pct,process_count) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id,sample_id) DO NOTHING'
-    ).bind(device,data.sample_id,data.observed_ms,now,data.evidence_kind,data.cpu_used_pct,data.ram_used_pct,data.ram_total_mb,data.ram_available_mb,data.commit_used_pct,data.process_count).run();
+      'INSERT INTO telemetry_readings (device_id,sample_id,observed_ms,received_ms,evidence_kind,cpu_used_pct,ram_used_pct,ram_total_mb,ram_available_mb,commit_used_pct,process_count) '
+      + 'SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS '
+      + '(SELECT 1 FROM telemetry_readings WHERE device_id=? AND received_ms>?) '
+      + 'ON CONFLICT(device_id,sample_id) DO NOTHING'
+    ).bind(device,data.sample_id,data.observed_ms,now,data.evidence_kind,data.cpu_used_pct,data.ram_used_pct,data.ram_total_mb,data.ram_available_mb,data.commit_used_pct,data.process_count,
+           device,now-45000).run();
     if(!result?.success)throw new Error('database_unavailable');
-    return response(result?.meta?.changes===0?200:202,{result:result?.meta?.changes===0?'duplicate_ignored':'accepted'});
+    if(result?.meta?.changes===0){
+      const saved=await env.TELEMETRY_DB.prepare('SELECT sample_id FROM telemetry_readings WHERE device_id=? AND sample_id=?').bind(device,data.sample_id).first();
+      return saved ? response(200,{result:'duplicate_ignored'}) : response(429,{error:'too_frequent'},{'retry-after':'60'});
+    }
+    return response(202,{result:'accepted'});
   }catch{return response(503,{error:'temporarily_unavailable'});}
 }
 export async function purgeExpired(env,event,nowFn=()=>Date.now()){
@@ -62,6 +73,7 @@ export async function purgeExpired(env,event,nowFn=()=>Date.now()){
   return {removed:r.meta?.changes??0};
 }
 export default {
-  fetch:acceptTelemetry,
+  // Cloudflare calls fetch(request, env, executionContext); do not treat ctx as a test clock.
+  async fetch(request,env){return acceptTelemetry(request,env);},
   async scheduled(event,env,ctx){const p=purgeExpired(env,event);if(ctx?.waitUntil)ctx.waitUntil(p);else await p;}
 };
