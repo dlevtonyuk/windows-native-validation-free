@@ -104,6 +104,16 @@ class ProviderDurability(unittest.TestCase):
         self.assertEqual(claim(db,300200),0)
         db.close()
 
+    def test_omitting_revision_cannot_change_state_or_claim(self):
+        db=init(':memory:');seed(db)
+        with self.assertRaises(sqlite3.IntegrityError):
+            change(db,"UPDATE uag_provider_runs SET phase='deadletter',last_error_code='bypass' WHERE period_key=?",(KEY,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            change(db,'UPDATE uag_provider_runs SET lease_until_ms=123456 WHERE period_key=?',(KEY,))
+        self.assertEqual(snapshot(db)[0],'new')
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM uag_provider_events').fetchone()[0],0)
+        db.close()
+
     def test_immutable_period_and_revision_skip_blocked(self):
         db=init(':memory:');seed(db)
         self.assertEqual(claim(db,100),1)
