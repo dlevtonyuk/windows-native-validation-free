@@ -80,7 +80,7 @@ test('Zoho status errors, impossible state and missing expiry fail closed',async
 });
 test('Download waits for completed job and checks signed expiry before GET',async()=>{
   let calls=0;
-  const fake=provider((url)=>{calls++;assert.equal(url.pathname,'/restapi/v2/bulk/workspaces/200/exportjobs/999/data');return response(200,oneCsv())});
+  const fake=provider((url,opts)=>{calls++;assert.equal(url.pathname,'/restapi/v2/bulk/workspaces/200/exportjobs/999/data');assert.equal(opts.headers.Accept,'text/csv');return response(200,oneCsv())});
   const base={fetcher:fake,token:'fictional',orgId:1,workspaceId:200,jobId:'999',expiryTimeMs:5000};
   await assert.rejects(downloadZoho({...base,nowMs:5000}),/expired/);
   assert.equal(calls,0);
