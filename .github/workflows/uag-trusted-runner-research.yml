@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '22'
       - name: Fixed SELECT, owner-private boundary and capacity offline tests
-        run: node --test research/trusted_runner/foundation_read_only.test.mjs
+        run: node --test research/trusted_runner/foundation_read_only.test.mjs research/trusted_runner/oidc_receipt.test.mjs
       - name: Verify all provider, cloud and owner secrets unavailable
         shell: bash
         run: |
