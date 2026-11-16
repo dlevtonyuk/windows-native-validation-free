@@ -13,7 +13,7 @@ function openDb(){
     bind(...args){return {async first(){return stmt.get(...args)??null},
                         async run(){const result=stmt.run(...args);return {success:true,meta:{changes:result.changes}}}}},
     async first(){return stmt.get()??null}
-  }}}}};
+  }}}};
 }
 test('schema has four extension slots, no privileged activation or state transition',()=>{
   const {raw}=openDb();
