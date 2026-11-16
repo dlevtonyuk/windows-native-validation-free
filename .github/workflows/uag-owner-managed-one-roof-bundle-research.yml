@@ -32,12 +32,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/uag-owner-manual-1" "$RUNNER_TEMP/uag-owner-manual-2"
           npx wrangler versions upload --dry-run --config research/universal_dispatch/one_roof_owner_managed.pending.toml --outdir "$RUNNER_TEMP/uag-owner-manual-1"
           npx wrangler versions upload --dry-run --config research/universal_dispatch/one_roof_owner_managed.pending.toml --outdir "$RUNNER_TEMP/uag-owner-manual-2"
-          test -s "$RUNNER_TEMP/uag-owner-manual-1/worker.js"
-          cmp "$RUNNER_TEMP/uag-owner-manual-1/worker.js" "$RUNNER_TEMP/uag-owner-manual-2/worker.js"
-          if grep -E 'fictional-admin-token|fictional-client|DO_NOT_LEAK_FICTIONAL_TOKEN' "$RUNNER_TEMP/uag-owner-manual-1/worker.js"; then
+          find "$RUNNER_TEMP/uag-owner-manual-1" -maxdepth 4 -type f -print
+          bundled1="$(find "$RUNNER_TEMP/uag-owner-manual-1" -type f \( -name '*.js' -o -name '*.mjs' \) | sort | head -n 1)"
+          bundled2="$(find "$RUNNER_TEMP/uag-owner-manual-2" -type f \( -name '*.js' -o -name '*.mjs' \) | sort | head -n 1)"
+          test -n "$bundled1"
+          test -n "$bundled2"
+          test -s "$bundled1"
+          cmp "$bundled1" "$bundled2"
+          if grep -E 'fictional-admin-token|fictional-client|DO_NOT_LEAK_FICTIONAL_TOKEN' "$bundled1"; then
             echo 'Unexpected test credential fixture inside bundle' >&2
             exit 1
           fi
-          wc -c "$RUNNER_TEMP/uag-owner-manual-1/worker.js"
-          sha256sum "$RUNNER_TEMP/uag-owner-manual-1/worker.js"
+          wc -c "$bundled1"
+          sha256sum "$bundled1"
           echo UAG_OWNER_MANAGED_ONE_ROOF_BUNDLE_REPRODUCIBLE_NO_DEPLOYMENT
