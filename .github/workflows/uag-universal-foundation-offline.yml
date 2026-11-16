@@ -1,0 +1,60 @@
+name: UAG universal deny-all foundation research
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'research/universal_dispatch/foundation_*'
+      - '.github/workflows/uag-universal-foundation-offline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  foundation-guardrails:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Deny-all SQLite + Cron idempotency + metadata-only adapter contract
+        run: node --experimental-sqlite --test research/universal_dispatch/foundation_worker.test.mjs
+      - name: No credential, business source or live deployment access
+        shell: bash
+        run: |
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${WORKYARD_API_TOKEN:-}"
+          test -z "${ZOHO_ACCESS_TOKEN:-}"
+          echo UAG_UNIVERSAL_FOUNDATION_DENY_ALL_TESTED
+  worker-compile-without-deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Deterministic Cloudflare module bundling without credentials or live upload
+        shell: bash
+        run: |
+          set -eu
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          mkdir -p "$RUNNER_TEMP/foundation-1" "$RUNNER_TEMP/foundation-2"
+          npx wrangler versions upload --dry-run --config research/universal_dispatch/foundation_pending.toml --outdir "$RUNNER_TEMP/foundation-1"
+          npx wrangler versions upload --dry-run --config research/universal_dispatch/foundation_pending.toml --outdir "$RUNNER_TEMP/foundation-2"
+          first="$(find "$RUNNER_TEMP/foundation-1" -type f -name '*.js' | sort | head -n 1)"
+          second="$(find "$RUNNER_TEMP/foundation-2" -type f -name '*.js' | sort | head -n 1)"
+          test -n "$first"
+          test -s "$first"
+          cmp "$first" "$second"
+          sha256sum "$first"
+          echo UAG_UNIVERSAL_FOUNDATION_REPRODUCIBLE_NO_DEPLOYMENT
