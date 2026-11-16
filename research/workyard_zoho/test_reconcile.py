@@ -153,6 +153,32 @@ class ReconciliationTests(unittest.TestCase):
         x=self.check();self.assertEqual(x['code_review_candidates'],0);self.assertEqual(x['code_classifications']['unconfigured_project_uncoded'],1)
     def test_field_mismatch_fail_result(self):
         z=self.z.replace(',processed,',',approved,');x=self.check(zoho=z);self.assertFalse(x['exact_match']);self.assertEqual(x['field_mismatches'],1)
+    def test_submitted_card_missing_in_zoho_reported_without_false_success(self):
+        # Realistic approval backlog: exported approved cards match, but a
+        # submitted card has not appeared in the Zoho source table.
+        submitted=self.w['pages']['processed'][0]['data'].pop()
+        submitted['status']='submitted'
+        self.w['pages']['submitted'][0]['data'].append(submitted)
+        self.w['pages']['processed'][0]['meta']['total']=0
+        self.w['pages']['submitted'][0]['meta']['total']=1
+        full=csv_of(self.w).splitlines(keepends=True)
+        only_approved=''.join(full[:2])
+        result=self.check(workyard=self.w,zoho=only_approved)
+        self.assertTrue(result['complete'])
+        self.assertFalse(result['exact_match'])
+        self.assertFalse(result['current_snapshot_match'])
+        self.assertEqual(result['missing_in_zoho'],1)
+        self.assertEqual(result['missing_in_zoho_by_workyard_status'],{'submitted':1})
+        self.assertEqual(result['field_mismatches'],0)
+        self.assertNotIn('private_exception_ids',result)
+
+    def test_missing_approved_card_is_not_labeled_submitted(self):
+        only_header=self.z.splitlines(keepends=True)[0]
+        result=self.check(zoho=only_header)
+        self.assertFalse(result['exact_match'])
+        self.assertEqual(result['missing_in_zoho_by_workyard_status'],{'approved':1,'processed':1})
+        self.assertEqual(result['missing_in_zoho'],2)
+
     def test_missing_zoho_allocation(self):
         z=self.z.replace(next(line for line in self.z.splitlines() if ',802,' in line)+'\r\n','')
         x=self.check(zoho=z);self.assertEqual(x['missing_in_zoho'],1);self.assertFalse(x['exact_match'])
