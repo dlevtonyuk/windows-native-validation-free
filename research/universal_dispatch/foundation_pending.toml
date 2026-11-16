@@ -1,0 +1,6 @@
+# OFFLINE RESEARCH ONLY. NO BUSINESS CAPABILITIES, TOKEN OR LIVE DEPLOYMENT.
+name = "uag-universal-foundation"
+main = "foundation_worker.mjs"
+compatibility_date = "2026-11-16"
+workers_dev = false
+# D1 binding intentionally OMITTED from public source; owner account-specific only.
