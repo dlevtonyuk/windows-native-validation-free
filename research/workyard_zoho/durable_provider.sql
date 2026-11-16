@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS uag_provider_events (
 );
 CREATE TRIGGER IF NOT EXISTS uag_provider_transition_audit
 AFTER UPDATE ON uag_provider_runs
-WHEN NEW.revision<>OLD.revision
 BEGIN
   SELECT CASE
     WHEN NEW.revision<>OLD.revision+1 THEN RAISE(ABORT,'revision_skip')
