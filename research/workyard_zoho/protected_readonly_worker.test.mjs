@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {advanceOne,lastClosedWeek,localMidnightUnix} from './protected_readonly_worker.mjs';
+import {advanceOne,lastClosedWeek,localMidnightUnix,chooseRunnablePeriod} from './protected_readonly_worker.mjs';
 
 const SCHEMA=readFileSync(new URL('./durable_provider.sql',import.meta.url),'utf8');
 const env={WY_TOKEN:'fictional-admin-token',WY_ORG_ID:'9',ZOHO_CLIENT_ID:'fictional-client',
@@ -138,5 +138,37 @@ test('Reclaimed lease fences off stale asynchronous worker results and stale fai
  assert.equal(after.lease_until_ms,0);
  assert.equal(after.last_error_code,null);
  assert.equal(pollCalls,2);
+ db.raw.close();
+});
+
+test('Scheduler selects oldest unfinished period after a new closed week begins',async()=>{
+ const db=makeDb(),now=1000000,latest={start:2000,end:3000};
+ db.raw.prepare("INSERT INTO uag_provider_runs(period_key,start_unix,end_unix,phase,zoho_job_id,updated_ms) VALUES(1000||':older',1000,2000,'poll','999',900000)").run();
+ assert.deepEqual(await chooseRunnablePeriod(db,now,latest),{start:1000,end:2000});
+ const rows=db.raw.prepare('SELECT period_key,phase FROM uag_provider_runs ORDER BY start_unix').all();
+ assert.equal(rows.length,2);
+ assert.equal(rows[1].period_key,'wyzoho:2000:3000');
+ // A later Cron still selects the unfinished older period rather than silently dropping it.
+ assert.deepEqual(await chooseRunnablePeriod(db,now+300000,latest),{start:1000,end:2000});
+ db.raw.close();
+});
+test('Exhausted provider job is audited as terminal, rather than stranded forever',async()=>{
+ const db=makeDb(),now=1000000,latest={start:2000,end:3000};
+ db.raw.prepare("INSERT INTO uag_provider_runs(period_key,start_unix,end_unix,phase,zoho_job_id,attempt_count,updated_ms) VALUES('old:1000:2000',1000,2000,'poll','999',12,900000)").run();
+ assert.deepEqual(await chooseRunnablePeriod(db,now,latest),latest);
+ const prior=db.raw.prepare("SELECT phase,last_error_code,revision FROM uag_provider_runs WHERE start_unix=1000").get();
+ assert.equal(prior.phase,'deadletter');
+ assert.equal(prior.last_error_code,'attempt_budget_exhausted');
+ assert.equal(prior.revision,1);
+ assert.equal(db.raw.prepare("SELECT event_kind FROM uag_provider_events WHERE period_key='old:1000:2000'").get().event_kind,'deadletter');
+ assert.deepEqual(await chooseRunnablePeriod(db,now+300000,latest),latest);
+ assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM uag_provider_events WHERE period_key='old:1000:2000'").get().n,1);
+ db.raw.close();
+});
+test('Future-due older period does not preempt runnable latest period',async()=>{
+ const db=makeDb(),now=1000000,latest={start:2000,end:3000};
+ db.raw.prepare("INSERT INTO uag_provider_runs(period_key,start_unix,end_unix,phase,zoho_job_id,next_due_ms,updated_ms) VALUES('old:1000:2000',1000,2000,'poll','999',1100000,900000)").run();
+ assert.deepEqual(await chooseRunnablePeriod(db,now,latest),latest);
+ assert.deepEqual(await chooseRunnablePeriod(db,1200000,latest),{start:1000,end:2000});
  db.raw.close();
 });
