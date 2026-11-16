@@ -29,3 +29,28 @@ A second real read-only period showed Zoho can retain historical allocation rows
 The added fields are `current_snapshot_match`, `historical_zoho_allocations`, `historical_zoho_hours`, `unexplained_zoho_allocations`, `raw_zoho_hours`, `current_equivalent_zoho_hours`, and `review_required`. The longstanding `exact_match` still means **exact raw row correspondence** and remains false if any historical rows exist. CLI returns a nonzero exit code when raw data differ, even if current-equivalent reconciliation succeeds; this ensures actionable exceptions cannot be silently ignored.
 
 The test fixtures contain NO user, company, employee, real allocation IDs, organization settings or credentials. A real report still needs authenticated live data, coverage, historical-event classification and scheduled unattended completion; offline tests alone cannot establish those.
+
+
+## Current-only Zoho export compatibility and source-status coverage
+
+A provider-tested Zoho V2 `SELECT t."column"...` export emits CSV headers such as
+`t.time_card_id`, rather than just `time_card_id`. The offline witness
+normalizes this known SQL alias prefix on input, rejects duplicate normalized
+headers, and still requires every original field. The export is not modified
+and no unknown column or missing field is fabricated.
+
+Source statuses must remain distinct: a completed local week can contain
+`submitted` cards whose allocation IDs are not present in the latest Zoho
+export. The witness now reports the *aggregate* `missing_in_zoho_by_workyard_status`
+without revealing employee/card/allocation IDs by default. **A matched
+approved subset is not equivalent to full-week success.** Submitted-only
+missing coverage and approved/processed missing coverage both keep
+`exact_match=false`; an upstream operator may classify the former as
+pending approval but must not silently discard or change the source status.
+
+The actual Zoho export API can return `jobCode=1001` before the same
+job later reaches `1004`. The provider-supplied export job ID, completion
+state and expiry must be persisted by an authorized independent executor;
+repeating a standalone proof in interactive chat is not unattended
+continuation. No such independent provider executor or secret handling is
+established by this research code.
