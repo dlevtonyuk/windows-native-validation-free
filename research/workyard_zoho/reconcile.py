@@ -214,16 +214,26 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
     direct, by_status, card_times, kinds, candidates, cards = _snapshot(workyard_json, start, end)
     text = zoho_csv.lstrip("\ufeff")
     csv_rows = csv.DictReader(io.StringIO(text))
-    if not csv_rows.fieldnames or set(REQUIRED_ZOHO) - set(csv_rows.fieldnames):
+    # Zoho V2 SELECT exports may prepend a SQL table alias ("t.") to each
+    # header. Normalize only that known prefix and reject collisions; never
+    # silently overwrite a field if both forms appear in the same export.
+    if not csv_rows.fieldnames:
+        raise IncompleteEvidence("missing Zoho export columns")
+    original_names = csv_rows.fieldnames
+    clean_names = [name[2:] if name.startswith("t.") else name for name in original_names]
+    if len(set(clean_names)) != len(clean_names):
+        raise IncompleteEvidence("ambiguous duplicate Zoho export columns")
+    if set(REQUIRED_ZOHO) - set(clean_names):
         raise IncompleteEvidence("missing Zoho export columns")
     other = {}
     syncs = set()
     sync_by_allocation = {}
-    for x in csv_rows:
-        if None in x:
+    for raw in csv_rows:
+        if None in raw:
             raise IncompleteEvidence("malformed csv extra columns")
-        if set(x) != set(csv_rows.fieldnames):
+        if set(raw) != set(original_names):
             raise IncompleteEvidence("malformed csv shape")
+        x = dict(zip(clean_names, (raw[name] for name in original_names)))
         a_id = _key(x.get("allocation_id"), "zoho allocation_id")
         if a_id in other:
             raise IncompleteEvidence("duplicate Zoho allocation")
