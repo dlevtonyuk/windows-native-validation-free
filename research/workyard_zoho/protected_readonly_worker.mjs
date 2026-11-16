@@ -41,7 +41,7 @@ export async function initialise(db,period,nowMs){
   return key;
 }
 async function claim(db,key,nowMs){
-  const result=await sql(db,'UPDATE '+DB_TABLE+' SET lease_until_ms=?,attempt_count=attempt_count+1,revision=revision+1,updated_ms=? WHERE period_key=? AND phase IN (\'new\',\'poll\',\'download\') AND next_due_ms<=? AND (lease_until_ms=0 OR lease_until_ms<?) AND attempt_count<12',nowMs+180000,nowMs,key,nowMs,nowMs);
+  const result=await sql(db,'UPDATE '+DB_TABLE+' SET lease_until_ms=?,attempt_count=attempt_count+1,revision=revision+1,updated_ms=? WHERE period_key=? AND phase IN (\'new\',\'poll\',\'download\') AND next_due_ms<=? AND (lease_until_ms=0 OR lease_until_ms<?) AND attempt_count<12',nowMs+960000,nowMs,key,nowMs,nowMs);
   if(!result?.meta||result.meta.changes!==1)return null;
   return row(db,'SELECT * FROM '+DB_TABLE+' WHERE period_key=?',key);
 }
@@ -143,7 +143,7 @@ export default {
   async scheduled(controller,env,ctx){
     // Disabled in repository research workflow. Activating a live scheduled
     // handler plus credentials and D1 bindings requires express owner approval.
-    ctx.waitUntil(scheduledResearch(env,controller.scheduledTime,fetch));
+    ctx.waitUntil(scheduledResearch(env,Date.now(),fetch));
   },
   async fetch(){return new Response('Not found',{status:404,headers:{'Cache-Control':'no-store'}})}
 };
