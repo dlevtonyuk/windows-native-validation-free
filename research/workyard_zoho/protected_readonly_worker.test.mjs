@@ -104,3 +104,39 @@ test('No owner-provisioned credentials fail to deadletter without network attemp
  assert.equal(called,false);
  db.raw.close();
 });
+
+test('Reclaimed lease fences off stale asynchronous worker results and stale failure handling',async()=>{
+ const db=makeDb(),basic=fakeTransport(),period={start:1000,end:2000},base=1000000;
+ let reached,release;
+ const entered=new Promise(resolve=>{reached=resolve});
+ const hold=new Promise(resolve=>{release=resolve});
+ let pollCalls=0;
+ const fetcher=async(url,options)=>{
+   const path=new URL(url).pathname;
+   if(path.endsWith('/exportjobs/999')){
+     pollCalls++;
+     if(pollCalls===1){reached();await hold}
+   }
+   return basic.fetcher(url,options);
+ };
+ const call=nowMs=>advanceOne({db,env,fetcher,nowMs,period});
+ assert.equal((await call(base)).stage,'poll');
+ const stale=call(base+30000);
+ await entered;
+ const newer=await call(base+30000+960001);
+ assert.equal(newer.state,'pending');
+ assert.equal(newer.stage,'poll');
+ const snapshot=db.raw.prepare('SELECT revision,updated_ms,lease_until_ms,phase FROM uag_provider_runs').get();
+ assert.equal(snapshot.phase,'poll');
+ assert.equal(snapshot.lease_until_ms,0);
+ release();
+ await assert.rejects(stale,/state_conflict/);
+ const after=db.raw.prepare('SELECT revision,updated_ms,lease_until_ms,phase,last_error_code FROM uag_provider_runs').get();
+ assert.equal(after.revision,snapshot.revision);
+ assert.equal(after.updated_ms,snapshot.updated_ms);
+ assert.equal(after.phase,'poll');
+ assert.equal(after.lease_until_ms,0);
+ assert.equal(after.last_error_code,null);
+ assert.equal(pollCalls,2);
+ db.raw.close();
+});
