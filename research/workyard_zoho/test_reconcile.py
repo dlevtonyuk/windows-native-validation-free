@@ -117,6 +117,23 @@ class ReconciliationTests(unittest.TestCase):
         self.assertTrue(x["current_snapshot_match"])
         self.assertEqual(x["historical_zoho_allocations"],0)
 
+    def test_provider_sql_alias_prefixed_headers_are_accepted(self):
+        lines=self.z.splitlines(keepends=True)
+        lines[0]=','.join('t.'+name for name in lines[0].strip().split(','))+'\r\n'
+        z=''.join(lines)
+        self.assertTrue(self.check(zoho=z)["exact_match"])
+
+    def test_mixed_alias_and_plain_headers_are_accepted(self):
+        lines=self.z.splitlines(keepends=True)
+        lines[0]=lines[0].replace('allocation_id,','t.allocation_id,',1)
+        self.assertTrue(self.check(zoho=''.join(lines))["exact_match"])
+
+    def test_ambiguous_alias_and_plain_collision_fails_closed(self):
+        lines=self.z.splitlines(keepends=True)
+        lines[0]=lines[0].strip() + ',t.allocation_id\r\n'
+        with self.assertRaisesRegex(IncompleteEvidence,'ambiguous duplicate'):
+            self.check(zoho=''.join(lines))
+
     def test_private_historical_ids_are_opt_in(self):
         z=self.z+self._extra_row()
         x=self.check(zoho=z,private_details=True)
