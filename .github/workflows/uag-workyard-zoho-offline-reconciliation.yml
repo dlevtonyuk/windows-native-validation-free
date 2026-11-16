@@ -30,6 +30,8 @@ jobs:
           node-version: '22'
       - name: Synthetic provider lifecycle - Workyard/Zoho GET-only boundary and state handoff
         run: node --test research/workyard_zoho/provider_client.test.mjs
+      - name: Research-only native SQLite provider worker restart and DST integration
+        run: node --experimental-sqlite --test research/workyard_zoho/protected_readonly_worker.test.mjs
       - name: Confirm no Cloudflare deployment or business credentials used
         shell: bash
         run: |
