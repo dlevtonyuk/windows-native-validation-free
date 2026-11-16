@@ -40,6 +40,26 @@ export async function initialise(db,period,nowMs){
   await sql(db,'INSERT OR IGNORE INTO '+DB_TABLE+' (period_key,start_unix,end_unix,updated_ms) VALUES(?,?,?,?)',key,period.start,period.end,nowMs);
   return key;
 }
+/**
+ * Select the oldest due unfinished period, rather than silently abandoning it
+ * when a new Monday becomes the most recently closed week. This is bounded,
+ * metadata-only state selection; no provider request or credential is used.
+ * Exhausted zero-lease attempts are made explicit deadletters with an audit row.
+ */
+export async function chooseRunnablePeriod(db,nowMs,latestPeriod){
+  if(!db||!mustPositive(nowMs))throw error('bad_scheduler');
+  await initialise(db,latestPeriod,nowMs);
+  const exhausted=await sql(db,"UPDATE "+DB_TABLE+
+    " SET phase='deadletter',last_error_code='attempt_budget_exhausted',revision=revision+1,updated_ms=?"+
+    " WHERE phase IN ('new','poll','download') AND attempt_count>=12"+
+    " AND lease_until_ms=0 AND updated_ms<=?",nowMs,nowMs);
+  if(!exhausted?.meta||!Number.isSafeInteger(exhausted.meta.changes))throw error('deadletter_write_unverified');
+  const due=await row(db,"SELECT start_unix,end_unix FROM "+DB_TABLE+
+    " WHERE phase IN ('new','poll','download') AND attempt_count<12"+
+    " AND next_due_ms<=? AND (lease_until_ms=0 OR lease_until_ms<?)"+
+    " ORDER BY start_unix ASC,updated_ms ASC LIMIT 1",nowMs,nowMs);
+  return due?{start:due.start_unix,end:due.end_unix}:latestPeriod;
+}
 async function claim(db,key,nowMs){
   const result=await sql(db,'UPDATE '+DB_TABLE+' SET lease_until_ms=?,attempt_count=attempt_count+1,revision=revision+1,updated_ms=? WHERE period_key=? AND phase IN (\'new\',\'poll\',\'download\') AND next_due_ms<=? AND (lease_until_ms=0 OR lease_until_ms<?) AND attempt_count<12',nowMs+960000,nowMs,key,nowMs,nowMs);
   if(!result?.meta||result.meta.changes!==1)return null;
@@ -134,7 +154,7 @@ export async function advanceOne({db,env,fetcher,nowMs,period}){
 }
 export async function scheduledResearch(env,nowMs,fetcher){
   if(!env?.DB)throw error('db_unavailable');
-  const period=lastClosedWeek(nowMs);
+  const period=await chooseRunnablePeriod(env.DB,nowMs,lastClosedWeek(nowMs));
   let result;
   for(let i=0;i<MAX_STEP_PER_CRON;i++){
     result=await advanceOne({db:env.DB,env,fetcher,nowMs,period});
