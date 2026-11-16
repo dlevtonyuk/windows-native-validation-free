@@ -1,0 +1,31 @@
+# OWNER-PRIVATE REPO TEMPLATE ONLY. NOT INSTALLED OR RUN HERE.
+# Owner must first restrict ChatGPT GitHub app installation to existing repos,
+# and independently verify this separate private repo is not app-accessible.
+# No provider API or privileged action is performed by this template.
+name: UAG Owner Trusted Read-Only Runner
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uag-trusted-runner
+  cancel-in-progress: false
+jobs:
+  foundation-read-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Owner-only fixed D1 SELECT probe
+        env:
+          UAG_CF_ACCOUNT_ID: ${{ vars.UAG_CF_ACCOUNT_ID }}
+          UAG_CF_D1_DATABASE_ID: ${{ vars.UAG_CF_D1_DATABASE_ID }}
+          UAG_CF_D1_READ_TOKEN: ${{ secrets.UAG_CF_D1_READ_TOKEN }}
+        run: node ./private_runner_main.mjs
