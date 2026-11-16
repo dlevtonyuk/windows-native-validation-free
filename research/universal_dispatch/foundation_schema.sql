@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS foundation_meta (
   created_ms INTEGER NOT NULL CHECK(created_ms>0)
 );
 INSERT OR IGNORE INTO foundation_meta(id,schema_version,execution_mode,created_ms)
-VALUES (1,1,'FOUNDATION_INERT',1794834000000);
+VALUES (1,1,'FOUNDATION_INERT',CAST(strftime('%s','now') AS INTEGER)*1000);
 
 CREATE TABLE IF NOT EXISTS foundation_capabilities (
   capability_id TEXT PRIMARY KEY CHECK(length(capability_id) BETWEEN 3 AND 64),
