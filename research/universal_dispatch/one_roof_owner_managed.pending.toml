@@ -1,0 +1,8 @@
+# RESEARCH BUNDLE ONLY — this is NOT a deployable production configuration.
+# Existing Cloudflare account, GitHub repo and auto-build remain unchanged.
+# No D1 binding, provider secrets, Worker Cron trigger or externally callable API.
+# An owner may separately authorize a disconnected, owner-managed Worker release.
+name = "uag-owner-managed-readonly-research"
+main = "../workyard_zoho/protected_readonly_worker.mjs"
+compatibility_date = "2026-11-16"
+workers_dev = false
