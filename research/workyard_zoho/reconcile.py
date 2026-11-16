@@ -256,6 +256,10 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
         }
     unmatched_direct = sorted(set(direct)-set(other))
     unmatched_zoho = sorted(set(other)-set(direct))
+    # Do not silently ignore unsettled source statuses. Surface a private-ID-free
+    # status breakdown so a scheduled run can distinguish missing submitted
+    # coverage from approved/processed mismatches, while still failing closed.
+    missing_by_status = Counter(direct[aid]["time_card_status"] for aid in unmatched_direct)
     discrepancies = []
     for aid in set(direct)&set(other):
         for field in COMPARE_KEYS:
@@ -286,6 +290,7 @@ def compare(workyard_json, zoho_csv, start_unix, end_unix, *, private_details=Fa
         "direct_allocations":len(direct),"zoho_allocations":len(other),
         "exact_allocations":len(set(direct)&set(other))-len(set(aid for aid,_ in discrepancies)),
         "missing_in_zoho":len(unmatched_direct),"missing_in_workyard":len(unmatched_zoho),
+        "missing_in_zoho_by_workyard_status":dict(sorted(missing_by_status.items())),
         "field_mismatches":len(discrepancies),
         "code_classifications":dict(kinds),
         "code_review_candidates":len(candidates),
