@@ -1,0 +1,43 @@
+name: UAG owner-managed one-roof bundle research
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'research/workyard_zoho/**'
+      - 'research/universal_dispatch/one_roof_owner_managed.pending.toml'
+      - '.github/workflows/uag-owner-managed-one-roof-bundle-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  no-deployment-one-file-bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pinned bundler without install scripts
+        run: npm install --no-save --ignore-scripts wrangler@4.158.0
+      - name: Build deterministic owner-dashboard-ready single script, with no external permissions
+        shell: bash
+        run: |
+          set -eu
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${WORKYARD_API_TOKEN:-}"
+          test -z "${ZOHO_ACCESS_TOKEN:-}"
+          mkdir -p "$RUNNER_TEMP/uag-owner-manual-1" "$RUNNER_TEMP/uag-owner-manual-2"
+          npx wrangler versions upload --dry-run --config research/universal_dispatch/one_roof_owner_managed.pending.toml --outdir "$RUNNER_TEMP/uag-owner-manual-1"
+          npx wrangler versions upload --dry-run --config research/universal_dispatch/one_roof_owner_managed.pending.toml --outdir "$RUNNER_TEMP/uag-owner-manual-2"
+          test -s "$RUNNER_TEMP/uag-owner-manual-1/worker.js"
+          cmp "$RUNNER_TEMP/uag-owner-manual-1/worker.js" "$RUNNER_TEMP/uag-owner-manual-2/worker.js"
+          if grep -E 'fictional-admin-token|fictional-client|DO_NOT_LEAK_FICTIONAL_TOKEN' "$RUNNER_TEMP/uag-owner-manual-1/worker.js"; then
+            echo 'Unexpected test credential fixture inside bundle' >&2
+            exit 1
+          fi
+          wc -c "$RUNNER_TEMP/uag-owner-manual-1/worker.js"
+          sha256sum "$RUNNER_TEMP/uag-owner-manual-1/worker.js"
+          echo UAG_OWNER_MANAGED_ONE_ROOF_BUNDLE_REPRODUCIBLE_NO_DEPLOYMENT
