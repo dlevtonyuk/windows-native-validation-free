@@ -43,6 +43,7 @@ BEGIN
     WHEN OLD.phase='new' AND NEW.phase='poll' AND NEW.zoho_job_id IS NOT NULL AND OLD.lease_until_ms>0 AND NEW.lease_until_ms=0 THEN 1
     WHEN OLD.phase='poll' AND NEW.phase='download' AND NEW.zoho_job_id=OLD.zoho_job_id AND NEW.expiry_ms>0 AND OLD.lease_until_ms>0 AND NEW.lease_until_ms=0 THEN 1
     WHEN OLD.phase='download' AND NEW.phase IN ('complete','review_required') AND NEW.result_sha256 IS NOT NULL AND OLD.lease_until_ms>0 AND NEW.lease_until_ms=0 THEN 1
+    WHEN NEW.phase='deadletter' AND OLD.phase IN('new','poll','download') AND OLD.attempt_count>=12 AND NEW.attempt_count=OLD.attempt_count AND OLD.lease_until_ms=0 AND NEW.lease_until_ms=0 THEN 1
     WHEN NEW.phase='deadletter' AND OLD.phase IN('new','poll','download') AND OLD.lease_until_ms>0 AND NEW.lease_until_ms=0 THEN 1
     ELSE RAISE(ABORT,'unauthorized_phase_transition')
   END;
