@@ -1,0 +1,35 @@
+name: UAG owner-private read-only runner research
+on:
+  push:
+    branches: [research/uag-owner-isolated-release-20261112]
+    paths:
+      - 'research/trusted_runner/**'
+      - '.github/workflows/uag-trusted-runner-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-owner-runner:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fixed SELECT, owner-private boundary and capacity offline tests
+        run: node --test research/trusted_runner/foundation_read_only.test.mjs
+      - name: Verify all provider, cloud and owner secrets unavailable
+        shell: bash
+        run: |
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${UAG_CF_D1_READ_TOKEN:-}"
+          test -z "${WORKYARD_API_TOKEN:-}"
+          test -z "${ZOHO_ACCESS_TOKEN:-}"
+          echo UAG_OWNER_RUNNER_RESEARCH_ONLY
