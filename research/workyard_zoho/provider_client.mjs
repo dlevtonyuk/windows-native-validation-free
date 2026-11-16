@@ -102,14 +102,14 @@ export async function downloadZoho({fetcher,token,orgId,workspaceId,jobId,expiry
   const jid=id(jobId,'job_id');
   if(!/^\d+$/.test(jid))throw failure('invalid_job_id');
   const path='/restapi/v2/bulk/workspaces/'+encodeURIComponent(id(workspaceId,'workspace_id'))+'/exportjobs/'+jid+'/data';
-  const res=await checkedGet(fetcher,ORIGINS.zoho,path,{},zoHeaders(token,orgId));
+  const res=await checkedGet(fetcher,ORIGINS.zoho,path,{}, {...zoHeaders(token,orgId),Accept:'text/csv'});
   const csv=await res.text();
   if(typeof csv!=='string'||csv.length===0||csv.length>8e6)throw failure('zoho_invalid_csv_size');
   return csv;
 }
-export async function collectWorkyard({fetcher,token,orgId,start,end,limit=200,maxPages=25}){
+export async function collectWorkyard({fetcher,token,orgId,start,end,limit=200,maxPages=10}){
   const [a,b]=interval(start,end);
-  if(!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(maxPages)||maxPages<1||maxPages>100)
+  if(!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(maxPages)||maxPages<1||maxPages>10)
     throw failure('invalid_page_budget');
   const result={start:a,endExclusive:b,statuses:{}};
   for(const status of REQUIRED_STATUSES){
