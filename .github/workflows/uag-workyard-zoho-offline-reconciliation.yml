@@ -25,6 +25,11 @@ jobs:
           python-version: '3.12'
       - name: Synthetic only - test strict source coverage and data equality
         run: python -m unittest discover -s research/workyard_zoho -p 'test_*.py' -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Synthetic provider lifecycle - Workyard/Zoho GET-only boundary and state handoff
+        run: node --test research/workyard_zoho/provider_client.test.mjs
       - name: Confirm no Cloudflare deployment or business credentials used
         shell: bash
         run: |
