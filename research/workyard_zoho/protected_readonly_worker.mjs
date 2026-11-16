@@ -45,35 +45,38 @@ async function claim(db,key,nowMs){
   if(!result?.meta||result.meta.changes!==1)return null;
   return row(db,'SELECT * FROM '+DB_TABLE+' WHERE period_key=?',key);
 }
-async function next(db,key,phase,nowMs,params){
+async function next(db,key,phase,nowMs,params,claim){
+  // Fencing token: an expired worker must never finish a job reclaimed by a newer owner.
+  if(!Number.isSafeInteger(claim?.revision)||!Number.isSafeInteger(claim?.lease_until_ms))throw error('missing_fence');
   let query,args;
   if(phase==='new'){
-    query='UPDATE '+DB_TABLE+' SET phase=\'poll\',zoho_job_id=?,next_due_ms=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'new\' AND lease_until_ms>?';
-    args=[params.jobId,nowMs+30000,nowMs,key,nowMs];
+    query='UPDATE '+DB_TABLE+' SET phase=\'poll\',zoho_job_id=?,next_due_ms=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'new\' AND revision=? AND lease_until_ms=?';
+    args=[params.jobId,nowMs+30000,nowMs,key,claim.revision,claim.lease_until_ms];
   }else if(phase==='poll' && params.kind==='pending'){
-    query='UPDATE '+DB_TABLE+' SET next_due_ms=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'poll\' AND lease_until_ms>?';
-    args=[nowMs+30000,nowMs,key,nowMs];
+    query='UPDATE '+DB_TABLE+' SET next_due_ms=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'poll\' AND revision=? AND lease_until_ms=?';
+    args=[nowMs+30000,nowMs,key,claim.revision,claim.lease_until_ms];
   }else if(phase==='poll' && params.kind==='download'){
-    query='UPDATE '+DB_TABLE+' SET phase=\'download\',expiry_ms=?,next_due_ms=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'poll\' AND lease_until_ms>?';
-    args=[params.expiry,nowMs,nowMs,key,nowMs];
+    query='UPDATE '+DB_TABLE+' SET phase=\'download\',expiry_ms=?,next_due_ms=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'poll\' AND revision=? AND lease_until_ms=?';
+    args=[params.expiry,nowMs,nowMs,key,claim.revision,claim.lease_until_ms];
   }else if(phase==='download'){
     const finish=params.result.exact_match?'complete':'review_required';
-    query='UPDATE '+DB_TABLE+' SET phase=?,result_sha256=?,aggregate_json=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'download\' AND lease_until_ms>?';
-    args=[finish,params.hash,JSON.stringify(params.result),nowMs,key,nowMs];
+    query='UPDATE '+DB_TABLE+' SET phase=?,result_sha256=?,aggregate_json=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=\'download\' AND revision=? AND lease_until_ms=?';
+    args=[finish,params.hash,JSON.stringify(params.result),nowMs,key,claim.revision,claim.lease_until_ms];
   }else throw error('invalid_stage');
   const r=await sql(db,query,...args);
   if(r?.meta?.changes!==1)throw error('state_conflict');
 }
-async function fail(db,key,phase,nowMs,code,{fatal=false,delayMs=300000}={}){
+async function fail(db,key,phase,nowMs,code,{fatal=false,delayMs=300000}={},claim){
+  if(!Number.isSafeInteger(claim?.revision)||!Number.isSafeInteger(claim?.lease_until_ms))throw error('missing_fence');
   // Never save raw request URL, token, private data, exception object or stack.
   const safe=['provider_rate_limited','zoho_export_expired','zoho_job_1003','zoho_job_1005','provider_no_response','provider_http_500','provider_http_503','workyard_page_count_mismatch','zoho_csv_shape'].includes(code)?code:'provider_execution_unknown';
   if(fatal||phase==='new'){
     // Unknown export-creation outcome cannot safely be retried immediately.
-    const r=await sql(db,'UPDATE '+DB_TABLE+' SET phase=\'deadletter\',last_error_code=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND lease_until_ms>?',safe,nowMs,key,nowMs);
+    const r=await sql(db,'UPDATE '+DB_TABLE+' SET phase=\'deadletter\',last_error_code=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND revision=? AND lease_until_ms=?',safe,nowMs,key,claim.revision,claim.lease_until_ms);
     if(r?.meta?.changes!==1)throw error('state_conflict');
     return 'deadletter';
   }
-  const r=await sql(db,'UPDATE '+DB_TABLE+' SET next_due_ms=?,last_error_code=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=? AND lease_until_ms>?',nowMs+delayMs,safe,nowMs,key,phase,nowMs);
+  const r=await sql(db,'UPDATE '+DB_TABLE+' SET next_due_ms=?,last_error_code=?,lease_until_ms=0,revision=revision+1,updated_ms=? WHERE period_key=? AND phase=? AND revision=? AND lease_until_ms=?',nowMs+delayMs,safe,nowMs,key,phase,claim.revision,claim.lease_until_ms);
   if(r?.meta?.changes!==1)throw error('state_conflict');
   return 'deferred';
 }
@@ -103,29 +106,29 @@ export async function advanceOne({db,env,fetcher,nowMs,period}){
     const zbase={fetcher,token:access,orgId:env.ZOHO_ORG_ID,workspaceId:env.ZOHO_WORKSPACE_ID};
     if(phase==='new'){
       const created=await beginZoho({...zbase,start:period.start,end:period.end});
-      await next(db,key,phase,nowMs,{jobId:created.jobId});
+      await next(db,key,phase,nowMs,{jobId:created.jobId},rec);
       return {state:'pending',stage:'poll'};
     }
     if(phase==='poll'){
       const current=await pollZoho({...zbase,jobId:rec.zoho_job_id});
       if(current.phase==='poll'){
-        await next(db,key,phase,nowMs,{kind:'pending'});
+        await next(db,key,phase,nowMs,{kind:'pending'},rec);
         return {state:'pending',stage:'poll'};
       }
-      await next(db,key,phase,nowMs,{kind:'download',expiry:current.expiryTimeMs});
+      await next(db,key,phase,nowMs,{kind:'download',expiry:current.expiryTimeMs},rec);
       return {state:'pending',stage:'download'};
     }
     if(phase==='download'){
       const csv=await downloadZoho({...zbase,jobId:rec.zoho_job_id,expiryTimeMs:rec.expiry_ms,nowMs});
       const direct=await collectWorkyard({fetcher,token:env.WY_TOKEN,orgId:env.WY_ORG_ID,start:period.start,end:period.end});
       const result=reconcile(direct,csv,{start:period.start,end:period.end});
-      await next(db,key,phase,nowMs,{result,hash:await digestAggregate(result)});
+      await next(db,key,phase,nowMs,{result,hash:await digestAggregate(result)},rec);
       return {state:result.exact_match?'complete':'review_required',summary:result};
     }
     throw error('stage_unexpected');
   }catch(ex){
     const code=String(ex?.code||'provider_execution_unknown');
-    await fail(db,key,phase,nowMs,code,{fatal:code==='zoho_export_expired'||code==='zoho_job_1003'||code==='zoho_job_1005',delayMs:Math.max(30000,Math.min(300000,Number(ex?.retryAfterSeconds||30)*1000))});
+    await fail(db,key,phase,nowMs,code,{fatal:code==='zoho_export_expired'||code==='zoho_job_1003'||code==='zoho_job_1005',delayMs:Math.max(30000,Math.min(300000,Number(ex?.retryAfterSeconds||30)*1000))},rec);
     return {state:'failed_or_deferred',code:code==='provider_rate_limited'?'provider_rate_limited':'provider_error'};
   }
 }
