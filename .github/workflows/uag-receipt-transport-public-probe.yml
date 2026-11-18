@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Verify Cloudflare public readiness and GitHub OIDC JWKS
         shell: bash
         run: |
@@ -43,3 +46,15 @@ jobs:
           const b=await r.json();if(b.reason!=='unauthorized')throw Error('UNEXPECTED_RECEIVER_BODY');
           process.stdout.write('OIDC_TRANSPORT_OK_BAD_REPOSITORY_REJECTED_401\n');
           JS
+      - name: Verify resilient reporter emits only sanitized wrong-repo rejection
+        shell: bash
+        env:
+          UAG_PROBE_STATUS: success
+        run: |
+          set +e
+          node ./research/trusted_runner/owner_signed_receipt_20261118_classified.mjs > /tmp/uag_reporter.out 2>&1
+          result=$?
+          set -e
+          if [[ $result -ne 1 ]]; then echo "UNEXPECTED_REPORTER_EXIT=$result"; exit 1; fi
+          if ! grep -qx 'SIGNED_RECEIPT_ERROR:RECEIPT_HTTP_401' /tmp/uag_reporter.out; then echo 'UNEXPECTED_REPORTER_CATEGORY'; exit 1; fi
+          echo 'CLASSIFIED_REPORTER_NEGATIVE_CONTROL_PASSED'
