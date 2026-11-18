@@ -7,6 +7,7 @@ on:
       - .github/workflows/uag-receipt-transport-public-probe.yml
 permissions:
   contents: read
+  id-token: write
 jobs:
   public-health:
     runs-on: ubuntu-24.04
@@ -26,3 +27,19 @@ jobs:
             echo "PROBE_OK http=$code"
           done
           echo "PROBE_SUCCEEDED"
+      - name: Verify OIDC fetch and intentional rejection of wrong repository (no credentials logged)
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          const api=process.env.ACTIONS_ID_TOKEN_REQUEST_URL, access=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+          if(!api||!access)throw Error('OIDC_ENV_UNAVAILABLE');
+          const url=new URL(api);url.searchParams.set('audience','uag-owner-receipts-v1');
+          const auth=await fetch(url,{headers:{Authorization:'bearer '+access},signal:AbortSignal.timeout(10000)});
+          if(!auth.ok)throw Error('OIDC_FETCH_ERROR_'+auth.status);
+          const jwt=(await auth.json()).value;
+          if(typeof jwt!=='string')throw Error('OIDC_INVALID_VALUE');
+          const r=await fetch('https://uag-owner-signed-receipts.dlevtonyuk.workers.dev/v1/receipt',{method:'POST',headers:{Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({probe_status:'success'}),signal:AbortSignal.timeout(15000)});
+          if(r.status!==401)throw Error('UNEXPECTED_RECEIVER_STATUS_'+r.status);
+          const b=await r.json();if(b.reason!=='unauthorized')throw Error('UNEXPECTED_RECEIVER_BODY');
+          process.stdout.write('OIDC_TRANSPORT_OK_BAD_REPOSITORY_REJECTED_401\n');
+          JS
