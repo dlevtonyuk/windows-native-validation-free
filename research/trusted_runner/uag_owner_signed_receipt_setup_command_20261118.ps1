@@ -1,5 +1,5 @@
 # Owner-private UAG signed-receipt setup, November 18, 2026.
-# Distributed by immutable GitHub blob with SHA256 verification. No manual download required.
+# Distributed by immutable GitHub blob with Git-object hash verification. No manual download required.
 # Run locally via authenticated gh CLI. Changes only two specified paths in
 # the owner's private repo; does not expose credentials or touch existing apps.
 Set-StrictMode -Version Latest
