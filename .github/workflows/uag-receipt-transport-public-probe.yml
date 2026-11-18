@@ -1,0 +1,28 @@
+name: UAG public receipt transport smoke test (no secrets)
+on:
+  push:
+    branches:
+      - research/uag-owner-isolated-release-20261112
+    paths:
+      - .github/workflows/uag-receipt-transport-public-probe.yml
+permissions:
+  contents: read
+jobs:
+  public-health:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Verify Cloudflare public readiness and GitHub OIDC JWKS
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "PROBE_START"
+          for u in 'https://uag-owner-signed-receipts.dlevtonyuk.workers.dev/health' 'https://token.actions.githubusercontent.com/.well-known/jwks'; do
+            code=$(curl --silent --show-error --location --max-time 12 --output /tmp/uag_response --write-out '%{http_code}' "$u")
+            result=$?
+            if [[ $result -ne 0 ]]; then echo "PROBE_TRANSPORT_FAILED curl_exit=$result"; exit 1; fi
+            if [[ "$code" != "200" ]]; then echo "PROBE_HTTP_FAILED code=$code"; exit 1; fi
+            if ! python3 -m json.tool /tmp/uag_response > /dev/null; then echo 'PROBE_INVALID_JSON'; exit 1; fi
+            echo "PROBE_OK http=$code"
+          done
+          echo "PROBE_SUCCEEDED"
