@@ -101,7 +101,14 @@ for($n=0;$n -lt 18;$n++) {
   Start-Sleep -Seconds 4
   $runs=(& gh run list -R $repo --workflow uag-owner-trusted-runner.yml --limit 10 --json databaseId,event,createdAt,status,conclusion | Out-String)
   RequireGh 'Finding latest run'
-  $matches=@($runs|ConvertFrom-Json|Where-Object {$_.event -ceq 'workflow_dispatch' -and ([DateTime]$_.createdAt).ToUniversalTime() -ge $started}|Sort-Object createdAt -Descending)
+  $runEntries=ConvertFrom-Json -InputObject $runs
+  $matchItems=New-Object System.Collections.ArrayList
+  foreach($entry in $runEntries) {
+    if($entry.event -cne 'workflow_dispatch') { continue }
+    try { $createdUtc=[DateTimeOffset]::Parse([string]$entry.createdAt).UtcDateTime } catch { continue }
+    if($createdUtc -ge $started) { [void]$matchItems.Add($entry) }
+  }
+  $matches=@($matchItems | Sort-Object createdAt -Descending)
   if($matches.Count -gt 0){$runId=[string]$matches[0].databaseId;break}
 }
 if(-not $runId){Write-Host 'REPORTER_RUN_DISCOVERY_PENDING: inspect private GitHub Actions; no other changes required.';exit 2}
