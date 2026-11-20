@@ -1,0 +1,34 @@
+name: UEA Signed Package Executor v0.5 Windows Native
+on:
+  workflow_dispatch:
+  push:
+    branches: ['research/uea-exec-native-20261120']
+    paths: ['research/uea_exec_native/**','.github/workflows/uea-exec-native.yml']
+permissions:
+  contents: read
+jobs:
+  synthetic-windows:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Parse production installer and agent with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @('Install-UEAExecution.ps1','Run-UEAExec.ps1','UEA-Diagnostic-v1.ps1')) {
+            $file=Join-Path '.\research\uea_exec_native\agent' $p
+            $errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$null,[ref]$errors)
+            if(@($errors).Count) { throw ('POWERSHELL_PARSE_FAILURE_'+$p+': '+$errors[0].Message) }
+          }
+          Write-Host 'UEA_EXEC_PRODUCTION_SYNTAX_PASSED'
+      - name: Verify disposable synthetic local owner authorization and child process
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\research\uea_exec_native\tests\Test-UEAExec-Native.ps1'
+          if($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
