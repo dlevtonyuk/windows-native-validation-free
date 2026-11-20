@@ -34,7 +34,9 @@ try {
   [IO.File]::WriteAllText((Join-Path $ro 'owner-grant.json'),(ConvertTo-Json -InputObject $grant -Depth 8 -Compress))
   $rsa.Dispose();$rsa=$null
   Write-Host 'UEA_SYNTHETIC_REPRO_START'
-  & $taskPath -SelfTest
+  $captured=@(& $taskPath -SelfTest)
+  if($captured -notcontains 'UEA_RO_SELFTEST_PASSED'){throw 'OUTPUT_CONTRACT_FAILED'}
+  Write-Host 'UEA_SELFTEST_CAPTURE_CONTRACT_PASSED'
   Write-Host 'UEA_SYNTHETIC_SELFTEST_SUCCEEDED'
 }catch{
   Write-Host ('UEA_SYNTHETIC_CHILD_FAILURE_CODE='+$_.Exception.Message)
