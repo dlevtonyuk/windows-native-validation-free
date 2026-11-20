@@ -145,7 +145,7 @@ try {
    }
    $probe=Protect-CmsMessage -To $controls.Certificate -Content 'UEA_READONLY_CMS_SELFTEST'
    if($probe -notmatch 'BEGIN CMS'){throw 'CMS_SELFTEST_FAILED'}
-   Write-Host 'UEA_RO_SELFTEST_PASSED';return
+   Write-Output 'UEA_RO_SELFTEST_PASSED';return
  }
  $claim=Request '/v1/agent/claim' ([ordered]@{}) $controls.Identity
  if($claim.state -eq 'empty'){Write-Host 'UEA_RO_NO_JOBS';return}
