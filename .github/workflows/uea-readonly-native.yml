@@ -20,6 +20,12 @@ jobs:
         shell: pwsh
         run: |
           if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'HOSTED_WINDOWS_ONLY' }
+      - name: Reproduce actual agent child self-test with synthetic local identity
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & '.\research\uea_readonly_native\Reproduce-UEA-v04-SelfTest.ps1'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run native Windows PowerShell 5.1 fixture
         shell: powershell
         run: |
