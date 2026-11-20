@@ -1,0 +1,26 @@
+name: Synthetic Workyard PowerShell Syntax Validation
+on:
+  push:
+    branches: [research/uag-workyard-approval-ps-parse-20261120]
+    paths:
+      - '.github/workflows/workyard-synthetic-ps-parse.yml'
+      - 'research/synthetic_workyard_approval/**'
+permissions:
+  contents: read
+jobs:
+  parse-only:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: PowerShell parser errors only; never execute approval code
+        shell: pwsh
+        run: |
+          $source = Get-Content -LiteralPath 'research/synthetic_workyard_approval/Synthetic_Approval_Parser.ps1' -Raw
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -ne 0) { $parseErrors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          Write-Output 'WORKYARD_POWERSHELL_SYNTHETIC_PARSE_PASSED'
