@@ -13,8 +13,8 @@ try {
  [IO.File]::WriteAllText((Join-Path $fixture 'credentials.txt'),'api_key="SENSITIVE_VERY_LONG_STRING_123456"',[Text.Encoding]::UTF8)
  [IO.File]::WriteAllText((Join-Path $fixture 'drop.exe'),'binary',[Text.Encoding]::UTF8)
  [IO.Directory]::CreateDirectory((Join-Path $fixture 'private'))|Out-Null
- Expect ((Assert-SafePath $fixture '.' 'inventory') -eq $fixture) 'ROOT_INVENTORY'
- Expect ((Assert-SafePath $fixture 'sample.py' 'read_file') -eq (Join-Path $fixture 'sample.py')) 'SOURCE_FILE'
+ Expect ((Assert-SafePath $fixture '.' 'inventory').TrimEnd('\\') -ieq $fixture.TrimEnd('\\')) 'ROOT_INVENTORY'
+ Expect ((Assert-SafePath $fixture 'sample.py' 'read_file').TrimEnd('\\') -ieq (Join-Path $fixture 'sample.py').TrimEnd('\\')) 'SOURCE_FILE'
  Deny {Assert-SafePath $fixture '../secret' 'read_file'} 'TRAVERSAL'
  Deny {Assert-SafePath $fixture 'C:\secrets' 'read_file'} 'ABSOLUTE'
  Deny {Assert-SafePath $fixture 'private' 'inventory'} 'PRIVATE_DIRECTORY'
