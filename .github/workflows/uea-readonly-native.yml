@@ -28,6 +28,11 @@ jobs:
           $errors = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$null,[ref]$errors)
           if (@($errors).Count) { throw ('POWERSHELL_PARSE_ERROR: '+$errors[0].Message) }
+          $installer = '.\\research\\uea_readonly_native\\Install-UEAReadOnly-SYNTHETIC.ps1'
+          $installErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $installer).Path,[ref]$null,[ref]$installErrors)
+          if (@($installErrors).Count) { throw ('INSTALLER_PARSE_ERROR: '+$installErrors[0].Message) }
+          Write-Host 'UEA_NATIVE_INSTALLER_SYNTAX_PASSED'
           $cert = New-SelfSignedCertificate -Type DocumentEncryptionCert -Subject 'CN=UEA Synthetic Recipient' -CertStoreLocation 'Cert:\CurrentUser\My'
           if (-not $cert) { throw 'SYNTHETIC_CERT_CREATE_FAILED' }
           try {
