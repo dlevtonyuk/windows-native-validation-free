@@ -35,42 +35,7 @@ try{
  Copy-Item -LiteralPath (Join-Path $packageDir 'UEA-Diagnostic-v1.ps1') -Destination (Join-Path $root 'packages\UEA-Diagnostic-v1.ps1')
  $agent=Join-Path $root 'Run-UEAExec.ps1';$pkg=Join-Path $root 'packages\UEA-Diagnostic-v1.ps1'
  $sha=(Get-FileHash -LiteralPath $pkg -Algorithm SHA256).Hash.ToLowerInvariant()
- Check ($sha -match '^[a-f0-9]{64}
- $ownerKeyName='UEA-ExecOwner-'+[guid]::NewGuid().ToString('N');$ownerKey=OpenKey $ownerKeyName;$ownerKey.PersistKeyInCsp=$true
- $pub=$ownerKey.ExportParameters($false);$jwk=[ordered]@{kty='RSA';e=(Url64 $pub.Exponent);n=(Url64 $pub.Modulus);alg='RS256';ext=$true}
- $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
- $certDigest=(Get-FileHash -LiteralPath (Join-Path $root 'recipient.cer') -Algorithm SHA256).Hash.ToLowerInvariant()
- $policy=[ordered]@{version=1;revision=1;device_id=$deviceId;capability='execute_approved_package';max_output_bytes=8192;max_runtime_seconds=45;issued_ms=$now;expires_ms=($now+3600000);recipient_cert_sha256=$certDigest;packages=@([ordered]@{package_id='uea_diagnostic_v1';package_sha256=$sha;filename='UEA-Diagnostic-v1.ps1';effect='none'})}
- $policyJson=ConvertTo-Json -InputObject $policy -Depth 10 -Compress
- $sig=$ownerKey.SignData([Text.Encoding]::UTF8.GetBytes($policyJson),[Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256'))
- $grant=[ordered]@{schema=1;policy_json=$policyJson;signature_b64=[Convert]::ToBase64String($sig);owner_public_jwk=$jwk}
- $grantPath=Join-Path $root 'owner-grant.json'
- [IO.File]::WriteAllText($grantPath,(ConvertTo-Json -InputObject $grant -Depth 10 -Compress))
- $ownerKey.Dispose();$ownerKey=$null;$identityKey.Dispose();$identityKey=$null
- $run=RunSelfTest $agent
- if($run.exit -ne 0){Write-Host ('AGENT_STDOUT='+$run.out);Write-Host ('AGENT_STDERR='+$run.err)}
- Check ($run.exit -eq 0) 'SELFTEST_EXIT'
- Check ($run.out -match 'UEA_EXEC_SELFTEST_OK') 'CHILD_EXECUTION_VERIFIED'
- Check ($run.err.Trim().Length -eq 0) 'NO_STDERR'
- $grantBackup=Get-Content -LiteralPath $grantPath -Raw
- $tampered=$grantBackup|ConvertFrom-Json;$tampered.policy_json=$tampered.policy_json.Replace('8192','8193')
- [IO.File]::WriteAllText($grantPath,(ConvertTo-Json -InputObject $tampered -Depth 10 -Compress))
- $test=RunSelfTest $agent
- Check ($test.exit -ne 0) 'SIGNATURE_TAMPER_DENIED'
- [IO.File]::WriteAllText($grantPath,$grantBackup)
- Add-Content -LiteralPath $pkg -Value '# unauthorized modification'
- $test=RunSelfTest $agent
- Check ($test.exit -ne 0) 'PACKAGE_HASH_TAMPER_DENIED'
- Write-Host ('UEA_EXEC_NATIVE_TESTS_PASSED='+$tests)
-}finally{
- $env:LOCALAPPDATA=$original
- if($certObject){Remove-Item -LiteralPath ('Cert:\CurrentUser\My\'+$certObject.Thumbprint) -Force -ErrorAction SilentlyContinue}
- if($ownerKey){$ownerKey.Dispose()};if($identityKey){$identityKey.Dispose()}
- foreach($name in @($ownerKeyName,$deviceKeyName)){
-  if($name){try{$cp=[Security.Cryptography.CspParameters]::new(24,'Microsoft Enhanced RSA and AES Cryptographic Provider',$name);$cp.Flags=[Security.Cryptography.CspProviderFlags]::UseExistingKey;$k=[Security.Cryptography.RSACryptoServiceProvider]::new(2048,$cp);$k.PersistKeyInCsp=$false;$k.Clear()}catch{}}
- }
- if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue}
-}) 'PACKAGE_DIGEST_READABLE'
+ Check ($sha -match '^[a-f0-9]{64}$') 'PACKAGE_DIGEST_READABLE'
  $ownerKeyName='UEA-ExecOwner-'+[guid]::NewGuid().ToString('N');$ownerKey=OpenKey $ownerKeyName;$ownerKey.PersistKeyInCsp=$true
  $pub=$ownerKey.ExportParameters($false);$jwk=[ordered]@{kty='RSA';e=(Url64 $pub.Exponent);n=(Url64 $pub.Modulus);alg='RS256';ext=$true}
  $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
