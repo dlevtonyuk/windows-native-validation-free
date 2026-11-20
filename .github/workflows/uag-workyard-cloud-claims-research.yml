@@ -1,0 +1,29 @@
+name: Workyard cloud claim ledger research (no effects)
+on:
+  push:
+    branches: [research/uag-workyard-cloud-claim-20261120]
+    paths:
+      - 'research/workyard_cloud_claim/**'
+      - '.github/workflows/uag-workyard-cloud-claims-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-claim-safety:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m unittest -v test_private_claims.py
+        working-directory: research/workyard_cloud_claim
+      - name: Confirm no production integration
+        run: echo "SYNTHETIC_ONLY_NO_NETWORK_NO_WORKYARD_APPROVAL"
