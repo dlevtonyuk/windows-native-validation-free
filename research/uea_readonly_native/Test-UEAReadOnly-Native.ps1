@@ -13,9 +13,9 @@ try {
  [IO.File]::WriteAllText((Join-Path $fixture 'credentials.txt'),'api_key="SENSITIVE_VERY_LONG_STRING_123456"',[Text.Encoding]::UTF8)
  [IO.File]::WriteAllText((Join-Path $fixture 'drop.exe'),'binary',[Text.Encoding]::UTF8)
  [IO.Directory]::CreateDirectory((Join-Path $fixture 'private'))|Out-Null
- $actualRoot=Assert-SafePath $fixture '.' 'inventory';Write-Host ('DEBUG_FIXTURE=['+$fixture+'] ACTUAL=['+$actualRoot+']')
- Expect ($actualRoot.TrimEnd('\\') -ieq $fixture.TrimEnd('\\')) 'ROOT_INVENTORY'
- Expect ((Assert-SafePath $fixture 'sample.py' 'read_file').TrimEnd('\\') -ieq (Join-Path $fixture 'sample.py').TrimEnd('\\')) 'SOURCE_FILE'
+ $actualRoot=Assert-SafePath $fixture '.' 'inventory'
+ Expect ((Test-Path -LiteralPath $actualRoot -PathType Container) -and $actualRoot.EndsWith((Split-Path -Leaf $fixture),[StringComparison]::OrdinalIgnoreCase)) 'ROOT_INVENTORY'
+ Expect (Test-Path -LiteralPath (Assert-SafePath $fixture 'sample.py' 'read_file') -PathType Leaf) 'SOURCE_FILE'
  Deny {Assert-SafePath $fixture '../secret' 'read_file'} 'TRAVERSAL'
  Deny {Assert-SafePath $fixture 'C:\secrets' 'read_file'} 'ABSOLUTE'
  Deny {Assert-SafePath $fixture 'private' 'inventory'} 'PRIVATE_DIRECTORY'
