@@ -1,0 +1,39 @@
+name: UEA ReadOnly v0.4 Synthetic Windows Checks
+on:
+  push:
+    branches: ['research/uea-readonly-native-20261120']
+    paths: ['research/uea_readonly_native/**','.github/workflows/uea-readonly-native.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-windows-readonly:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify hosted synthetic Windows
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'HOSTED_WINDOWS_ONLY' }
+      - name: Run native Windows PowerShell 5.1 fixture
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = '.\research\uea_readonly_native\Run-UEAReadOnly-SYNTHETIC.ps1'
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$null,[ref]$errors)
+          if (@($errors).Count) { throw ('POWERSHELL_PARSE_ERROR: '+$errors[0].Message) }
+          $cert = New-SelfSignedCertificate -Type DocumentEncryptionCert -Subject 'CN=UEA Synthetic Recipient' -CertStoreLocation 'Cert:\CurrentUser\My'
+          if (-not $cert) { throw 'SYNTHETIC_CERT_CREATE_FAILED' }
+          try {
+            Export-Certificate -Cert $cert -FilePath '.\research\uea_readonly_native\recipient.cer' -Force | Out-Null
+            & '.\research\uea_readonly_native\Test-UEAReadOnly-Native.ps1'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Remove-Item -LiteralPath ('Cert:\CurrentUser\My\'+$cert.Thumbprint) -Force -ErrorAction SilentlyContinue
+          }
